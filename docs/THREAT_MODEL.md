@@ -1,0 +1,108 @@
+# Meta-Guardian — Threat Model, Demo Scenarios & KPIs
+
+This document is the source of truth for **what is real**, **what is measured**
+and **what is out of scope**. It exists because a security demo is only credible
+if its claims survive a hostile reviewer.
+
+---
+
+## 1. Assets and trust boundaries
+
+| Asset | Where | Why it matters |
+|---|---|---|
+| Aviation Ops API (`backend/target_service.py`, port 8001) | Local host | Simulated operational microservice. Holds flight/ops records. |
+| Edge sensor host (webcam + `psutil` + log tail) | Local host | Observes physical and OS-level events. |
+| SOC decision agent (Muse Glimmer, self-hosted) | Edge / local | Must decide fast without shipping camera frames to the cloud. |
+| Forensics + patch planner (Muse Spark 1.3, 1M ctx) | Cloud API | Sees only sanitized evidence + 30-day SIEM archive. |
+| 30-day SIEM archive (`data/history_logs/`) | Local file | Synthetic but realistic; every citation is line-verifiable. |
+
+Trust boundaries:
+
+```
+[ physical world ] --camera--> [ edge host ] --sanitized evidence--> [ cloud LLM ]
+                                     |                                     |
+                                     +--MCP actions--> [ target service ] <+
+```
+
+- Camera frames **never** leave the host. Only a text description, a boolean
+  `operator_present`, a confidence value and a cropped ROI hash are sent.
+- API keys stay in `.env`; `.env` is git-ignored; smoke tests never print keys.
+- The LLM may only select a **pre-approved patch template and bounded
+  parameters**. It never emits executable code that is run directly.
+
+## 2. Adversaries and threats
+
+| # | Adversary | Technique | Detection signal | Containment |
+|---|---|---|---|---|
+| T1 | Local insider / visitor | Inserts removable media with an unsigned PowerShell payload | `psutil` partition-added event + file scan (`payload.ps1`) + camera ROI | Quarantine file, record SHA-256 |
+| T2 | Remote attacker | Unauthenticated exfiltration against `/api/v1/ops/data` | Request log tail: endpoint + missing session + exfil markers | Block source IP, revoke session |
+| T3 | Remote attacker | Reconnaissance days before the attack | 1M-context scan of 30-day archive, timestamp validation | Foresnsics report with citations |
+| T4 | Remote attacker | "Ghost" admin command while the seat is empty | Camera: `operator_present == false` during privileged call | Revoke session, classify `GHOST_ATTACK` |
+| T5 | Malicious or careless engineer | Legitimate maintenance during an approved window | Change ticket covers timestamp **and** operator present | Classify `BENIGN_AUTHORIZED`, no action |
+| T6 | Reviewer | LLM hallucinates a log line or a patch | Citation verifier + deterministic patch template + rollback | Report rejected, no change applied |
+
+### Explicit non-claims
+
+- **No USB autorun.** Modern Windows ships with Autorun for removable media
+  disabled. Scenario A does **not** claim the script executed by itself. The
+  claim is: *suspicious executable content on removable media was detected,
+  hashed and quarantined before execution.*
+- **No kernel driver / no EDR driver.** USB detection is user-space `psutil`.
+- **No real aviation data.** All records are synthetic.
+- **No 7/24 video streaming.** That is the point: one frame per event.
+
+## 3. Demo scenarios (sanitized)
+
+### Scenario A — Rogue removable media + API exfiltration
+1. An unsigned `payload.ps1` is placed on a USB stick and the stick is inserted.
+   The script does **not** run automatically; it is at rest.
+2. `psutil` emits a partition event; the edge watcher scans the new volume,
+   finds the script, computes its SHA-256 and raises a `HIGH` event.
+3. At the same moment a request without a session token hits
+   `GET /api/v1/ops/data?aircraft=ALL` and receives `HTTP 200` (the leak).
+4. The webcam frame at incident time is analyzed; an operator is present but no
+   change ticket covers the window → `THREAT_CRITICAL`.
+5. MCP actions: quarantine `payload.ps1`, block `203.0.113.66`, revoke
+   `session-7f3a9c`.
+6. Muse Spark 1.3 finds the 3-days-earlier reconnaissance line in the 30-day
+   archive, cites file + line, and proposes a template-based rule.
+7. The rule is hot-loaded into the target service; the **same** request is
+   replayed: `HTTP 200` → `HTTP 403`. Patch fingerprint and both statuses are
+   reported.
+
+### Scenario B — Ghost attack (remote shell, empty seat)
+1. No operator is visible in the camera frame.
+2. A privileged command is executed against `/api/v1/admin/command`.
+3. Classification `GHOST_ATTACK`; session is revoked and the IP blocked.
+4. This is the case a passive dashboard cannot catch.
+
+### Scenario C — Authorized maintenance (zero false alarms)
+1. An engineer is present **and** `change_tickets.json` covers the timestamp.
+2. Classification `BENIGN_AUTHORIZED`; **no** quarantine, **no** block.
+3. Proof that the policy engine, not the LLM alone, gates destructive actions.
+
+## 4. KPI table (measured, not claimed)
+
+`scripts/benchmark_latency.py` emits a `KPIReport` for each scenario. Targets are
+checked in CI-style tests where deterministic; live targets are recorded.
+
+| KPI | Definition | Target | How measured |
+|---|---|---|---|
+| **MTTD (edge)** | trigger timestamp → correlated `SecurityEvent` | < 2 s | event timestamps |
+| **MTTC (containment)** | decision start → last MCP action success | < 1 s | `MCPActionResult.executed_at` |
+| **Patch + verify** | forensics start → replayed `403` | < 90 s live, < 5 s mock | `PatchResult` timestamps |
+| **End-to-end** | trigger → verified patch | < 120 s live, < 10 s mock | incident timestamps |
+| **Detection precision** | true positives / all raised incidents | ≥ 0.90 | 3-scenario suite |
+| **Detection recall** | A and B detected / 2 | 1.00 | 3-scenario suite |
+| **False positive rate** | C misclassified / 1 | 0.00 | Scenario C |
+| **Cloud calls / incident** | forensics + patch plan (+1 SAM) | ≤ 3 | provider call counter |
+| **Video tokens saved** | 1 frame per event vs 30 FPS streaming | > 99.9 % | arithmetic, documented |
+| **Citation validity** | cited line exists **and** excerpt matches | 100 % | `backend/cloud/citations.py` test |
+| **Patch safety** | bad/unknown template rejected, rollback works | 100 % | unit tests |
+| **Determinism (replay)** | identical classification across 3 replays | 3/3 | replay test |
+
+### Why these KPIs win Technical Depth
+- They are **falsifiable**: a reviewer can rerun the tests and diff the numbers.
+- They separate **edge latency** (local, sub-second) from **cloud latency**
+  (forensics, seconds), which is the honest architecture story.
+- They prove the **negative** case (Scenario C) instead of only the happy path.

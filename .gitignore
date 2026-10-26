@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Runtime artefacts
+data/fixtures/*.json
+!data/fixtures/.gitkeep
+data/history_logs/*.log
+data/history_logs/*.json
+!data/history_logs/.gitkeep
+data/scenarios/*.png
+data/scenarios/*.jpg
+data/runtime/
+*.quarantine
+quarantine/
+
+# Models / captures
+models/
+*.onnx
+*.pt
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
