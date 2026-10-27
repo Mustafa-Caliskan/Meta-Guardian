@@ -1,0 +1,25 @@
+.git
+.gitignore
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# secrets and local state
+.env
+.env.*
+!.env.example
+
+# runtime artefacts are bind-mounted, never baked into the image
+data/runtime
+data/history_logs/*.log
+data/history_logs/*.json
+quarantine
+
+# OS noise
+.DS_Store
+Thumbs.db

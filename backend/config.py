@@ -80,6 +80,11 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8000
     target_port: int = 8001
+    # Where the control plane reaches the target. In Docker this is the service
+    # name (target-api); on the host it defaults to the bind host.
+    target_host: str = ""
+    enable_watchers: bool = True
+    cors_origins: str = ""
 
     meta_api_key: str = ""
     meta_base_url: str = "https://api.meta.ai/v1"
@@ -124,7 +129,20 @@ class Settings:
 
     @property
     def target_base_url(self) -> str:
-        return f"http://{self.host}:{self.target_port}"
+        return f"http://{self.resolve_target_host}:{self.target_port}"
+
+    @property
+    def resolve_target_host(self) -> str:
+        if self.target_host:
+            return self.target_host
+        # 0.0.0.0 is a bind address, not a reachable destination.
+        if self.host in ("0.0.0.0", "::", ""):
+            return "127.0.0.1"
+        return self.host
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [part.strip() for part in self.cors_origins.split(",") if part.strip()]
 
     @property
     def request_log_path(self) -> Path:
@@ -168,6 +186,9 @@ def get_settings() -> Settings:
         host=_env("HOST", "127.0.0.1"),
         port=_env_int("PORT", 8000),
         target_port=_env_int("TARGET_PORT", 8001),
+        target_host=_env("TARGET_HOST", ""),
+        enable_watchers=_env("ENABLE_WATCHERS", "1") not in ("0", "false", "False"),
+        cors_origins=_env("CORS_ORIGINS", ""),
         meta_api_key=_env_first("MODEL_API_KEY", "META_API_KEY"),
         meta_base_url=_env("META_BASE_URL", "https://api.meta.ai/v1"),
         baseten_api_key=_env("BASETEN_API_KEY"),

@@ -296,6 +296,16 @@ Replay record: `data/fixtures/forensics_full_archive.json`.
 
 State it on camera as a validation run, not as the per-incident path.
 
+## Docker
+
+```bash
+docker compose up --build     # target-api :8001 + soc-cockpit :8000
+```
+
+The physical sensor (webcam, `psutil` USB) stays on the host because a container
+cannot observe host devices. Everything else runs in the stack. Details and
+constraints: [`docs/DOCKER.md`](docs/DOCKER.md).
+
 ## Documentation
 
 - [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — adversaries, trust boundaries,

@@ -898,7 +898,7 @@ def create_app(
     return app
 
 
-app = create_app(enable_watchers=True)
+app = create_app(enable_watchers=get_settings().enable_watchers)
 
 
 def main() -> None:  # pragma: no cover - manual entrypoint
