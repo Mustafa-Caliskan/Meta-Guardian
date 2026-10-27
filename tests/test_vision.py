@@ -12,6 +12,7 @@ from backend.vision import (
     crop_roi,
     detect_motion,
     extract_boxes,
+    load_frame,
     mask_from_roi,
     save_frame,
 )
@@ -205,3 +206,15 @@ def test_data_uri_is_valid_base64():
     prefix, encoded = uri.split(",", 1)
     assert prefix == "data:image/jpeg;base64"
     assert base64.b64decode(encoded)[:2] == b"\xff\xd8"
+
+
+def test_save_and_load_frame_with_unicode_path(tmp_path: Path):
+    target = tmp_path / "Masa\u00fcst\u00fc" / "\u00e7ekim" / "frame.png"
+    image = add_rect(make_frame(), 10, 10, 30, 30)
+    saved = save_frame(image, target)
+
+    assert saved.exists()
+    assert saved.read_bytes()[:4] == b"\x89PNG"
+
+    loaded = load_frame(saved)
+    assert loaded.shape == (120, 160, 3)

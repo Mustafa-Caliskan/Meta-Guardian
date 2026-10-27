@@ -60,19 +60,33 @@ def _require_cv2():
 
 
 def save_frame(image: np.ndarray, destination: Path) -> Path:
+    """Write an image to disk without OpenCV's Unicode path limitation.
+
+    ``cv2.imwrite`` fails on Windows paths containing non-ASCII characters
+    (for example a Turkish user folder). Encoding in memory and writing with
+    ``Path.write_bytes`` keeps the pipeline working for every user.
+    """
     cv2_module = _require_cv2()
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if not cv2_module.imwrite(str(destination), image):
-        raise FrameUnavailableError(f"could not write frame to {destination}")
+    suffix = destination.suffix or ".png"
+    ok, buffer = cv2_module.imencode(suffix, image)
+    if not ok:
+        raise FrameUnavailableError(f"could not encode frame for {destination}")
+    destination.write_bytes(buffer.tobytes())
     return destination
 
 
 def load_frame(path: Path | str) -> np.ndarray:
     cv2_module = _require_cv2()
-    image = cv2_module.imread(str(path))
+    path = Path(path)
+    try:
+        raw = np.frombuffer(path.read_bytes(), dtype=np.uint8)
+    except OSError as exc:
+        raise FrameUnavailableError(f"could not read frame from {path}: {exc}") from exc
+    image = cv2_module.imdecode(raw, cv2_module.IMREAD_COLOR)
     if image is None:
-        raise FrameUnavailableError(f"could not read frame from {path}")
+        raise FrameUnavailableError(f"could not decode frame from {path}")
     return image
 
 

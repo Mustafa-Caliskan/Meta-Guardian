@@ -21,6 +21,11 @@ data/history_logs/*.json
 data/change_tickets.json
 data/scenarios/*.png
 data/scenarios/*.jpg
+!data/scenarios/operator_present.png
+!data/scenarios/operator_absent.png
+!data/scenarios/hand_usb.png
+!data/scenarios/diff_pair/baseline.png
+!data/scenarios/diff_pair/current.png
 data/runtime/
 *.quarantine
 quarantine/

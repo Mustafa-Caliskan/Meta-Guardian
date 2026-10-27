@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover
 
 from ..config import get_settings
 from .roi_detector import detect_motion, mask_from_roi
+from .webcam_capture import save_frame
 
 DEFAULT_PROMPT = "the hand inserting the USB drive"
 
@@ -273,9 +274,8 @@ class SAMBridge:
     ) -> Path | None:
         if mask_path is None or roi is None or cv2 is None:
             return None
-        path = Path(mask_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        mask = mask_from_roi(image.shape, roi)
-        if not cv2.imwrite(str(path), mask):
+        try:
+            mask = mask_from_roi(image.shape, roi)
+            return save_frame(mask, Path(mask_path))
+        except Exception:  # noqa: BLE001 - mask is optional evidence
             return None
-        return path

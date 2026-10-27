@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meta-Guardian — Cyber-Physical SOC</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="scanline" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="shield" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M12 2.5 4.5 5.5v6c0 4.6 3.1 8.6 7.5 10 4.4-1.4 7.5-5.4 7.5-10v-6L12 2.5Z" />
+          <path d="m8.7 12 2.2 2.2 4.4-4.6" />
+        </svg>
+      </div>
+      <div>
+        <h1>META<span>-</span>GUARDIAN</h1>
+        <p class="tagline">Autonomous cyber-physical containment &amp; self-healing SOC</p>
+      </div>
+    </div>
+
+    <div class="badges">
+      <span class="badge" id="modeBadge" data-kind="mode">mode: —</span>
+      <span class="badge" id="modelOoda">glimmer</span>
+      <span class="badge" id="modelSam">sam-3.1</span>
+      <span class="badge" id="modelSpark">spark-1.3</span>
+      <span class="badge" id="modelOpen">spark-open</span>
+      <span class="badge conn" id="connBadge" data-state="off">● offline</span>
+    </div>
+  </header>
+
+  <section class="stats" aria-label="Live counters">
+    <div class="stat"><span class="k">events</span><strong id="statEvents">0</strong></div>
+    <div class="stat"><span class="k">incidents</span><strong id="statIncidents">0</strong></div>
+    <div class="stat"><span class="k">contained</span><strong id="statContained">0</strong></div>
+    <div class="stat"><span class="k">pending approval</span><strong id="statPending">0</strong></div>
+    <div class="stat wide"><span class="k">uptime</span><strong id="statUptime">00:00:00</strong></div>
+  </section>
+
+  <main class="grid">
+    <!-- LEFT COLUMN ------------------------------------------------------ -->
+    <section class="col col-left">
+      <article class="panel">
+        <header class="panel-head">
+          <h2>Scenario injector</h2>
+          <span class="hint">real pipeline, real containment</span>
+        </header>
+        <div class="scenario-list" id="scenarioList"></div>
+      </article>
+
+      <article class="panel">
+        <header class="panel-head">
+          <h2>Target gateway</h2>
+          <span class="pill" id="gatewayPill">unknown</span>
+        </header>
+        <div class="gateway" id="gatewayBody">
+          <p class="muted">reading /internal/state…</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- CENTER COLUMN ---------------------------------------------------- -->
+    <section class="col col-center">
+      <article class="panel evidence">
+        <header class="panel-head">
+          <h2>Vision evidence — SAM 3.1</h2>
+          <span class="pill" id="visionPill">idle</span>
+        </header>
+        <div class="evidence-grid">
+          <figure>
+            <img id="frameImg" alt="Incident camera frame" hidden />
+            <div class="placeholder" id="framePlaceholder">no frame yet</div>
+            <figcaption>camera frame · one per event</figcaption>
+          </figure>
+          <figure>
+            <img id="maskImg" alt="SAM segmentation mask" hidden />
+            <div class="placeholder" id="maskPlaceholder">no mask yet</div>
+            <figcaption>pixel mask · bbox prompt</figcaption>
+          </figure>
+        </div>
+        <p class="vision-note" id="visionNote">Trigger a scenario to capture physical evidence.</p>
+      </article>
+
+      <article class="panel">
+        <header class="panel-head">
+          <h2>OODA timeline</h2>
+          <span class="hint" id="timelineIncident">no incident</span>
+        </header>
+        <ol class="timeline" id="timeline">
+          <li class="empty">Observe → Orient → Decide → Act</li>
+        </ol>
+      </article>
+
+      <article class="panel logs">
+        <header class="panel-head">
+          <h2>Live event stream</h2>
+          <span class="hint">WebSocket /ws</span>
+        </header>
+        <ul class="log-feed" id="logFeed"></ul>
+      </article>
+    </section>
+
+    <!-- RIGHT COLUMN ----------------------------------------------------- -->
+    <section class="col col-right">
+      <article class="panel">
+        <header class="panel-head">
+          <h2>Incidents</h2>
+          <span class="hint" id="incidentCount">0</span>
+        </header>
+        <div class="incident-list" id="incidentList">
+          <p class="muted">No incidents yet.</p>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>Meta-Guardian · Meta Global AI Developer Hackathon 2026</span>
+    <span>edge frame-diff + SAM 3.1 · MCP quarantine · deterministic policy gate</span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
