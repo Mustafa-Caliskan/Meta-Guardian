@@ -18,6 +18,7 @@ data/fixtures/*.json
 data/history_logs/*.log
 data/history_logs/*.json
 !data/history_logs/.gitkeep
+data/change_tickets.json
 data/scenarios/*.png
 data/scenarios/*.jpg
 data/runtime/

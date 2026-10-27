@@ -32,14 +32,18 @@ async def test_mock_ooda_detects_threat():
 
 async def test_mock_ooda_detects_authorized_maintenance():
     llm = MockLLM()
-    payload, _ = await llm.complete_json(_user("ticket approved"), task="ooda")
+    payload, _ = await llm.complete_json(
+        _user('{"change_ticket_valid": true, "operator_present": true}'), task="ooda"
+    )
     assert payload["classification"] == "BENIGN_AUTHORIZED"
     assert payload["actions"] == []
 
 
 async def test_mock_ghost_attack_has_no_operator():
     llm = MockLLM()
-    payload, _ = await llm.complete_json(_user("ghost empty seat"), task="ooda")
+    payload, _ = await llm.complete_json(
+        _user('{"operator_present": false, "change_ticket_valid": false}'), task="ooda"
+    )
     assert payload["classification"] == "GHOST_ATTACK"
 
 

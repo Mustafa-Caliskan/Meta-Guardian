@@ -1,0 +1,12 @@
+{
+  "tickets": [
+    {
+      "ticket_id": "CHG-2026-77",
+      "operator": "mustafa",
+      "reason": "approved maintenance window: USB driver update",
+      "window_start": "2026-11-02T09:00:00Z",
+      "window_end": "2026-11-02T11:00:00Z",
+      "usb_allowed": true
+    }
+  ]
+}

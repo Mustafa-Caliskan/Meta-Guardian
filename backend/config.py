@@ -99,8 +99,13 @@ class Settings:
     temperature: float = 0.2
     max_tokens: int = 2048
 
+    action_timeout: float = 10.0
+    max_actions_per_minute: int = 30
+
     fixtures_dir: Path = field(default_factory=lambda: FIXTURES_DIR)
     runtime_dir: Path = field(default_factory=lambda: RUNTIME_DIR)
+    quarantine_dir: Path = field(default_factory=lambda: PROJECT_ROOT / "quarantine")
+    change_tickets_path: Path = field(default_factory=lambda: DATA_DIR / "change_tickets.json")
 
     @property
     def is_offline(self) -> bool:
@@ -121,6 +126,7 @@ class Settings:
             SCENARIOS_DIR,
             HISTORY_LOGS_DIR,
             self.runtime_dir,
+            self.quarantine_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 
@@ -154,8 +160,14 @@ def get_settings() -> Settings:
         request_timeout=_env_float("REQUEST_TIMEOUT", 60.0),
         temperature=_env_float("TEMPERATURE", 0.2),
         max_tokens=_env_int("MAX_TOKENS", 2048),
+        action_timeout=_env_float("ACTION_TIMEOUT", 10.0),
+        max_actions_per_minute=_env_int("MAX_ACTIONS_PER_MINUTE", 30),
         fixtures_dir=Path(_env("FIXTURES_DIR", str(FIXTURES_DIR))),
         runtime_dir=Path(_env("RUNTIME_DIR", str(RUNTIME_DIR))),
+        quarantine_dir=Path(_env("QUARANTINE_DIR", str(PROJECT_ROOT / "quarantine"))),
+        change_tickets_path=Path(
+            _env("CHANGE_TICKETS_PATH", str(DATA_DIR / "change_tickets.json"))
+        ),
     )
     settings.ensure_dirs()
     return settings

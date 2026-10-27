@@ -114,6 +114,29 @@ class MCPAction(BaseModel):
     action: ActionType
     target: str
     reason: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PolicyMode(str, Enum):
+    AUTO = "auto"
+    APPROVAL = "approval"
+    MONITOR = "monitor"
+
+
+class PolicyOutcome(BaseModel):
+    """Deterministic gate between the LLM proposal and real-world actions."""
+
+    classification: Classification
+    severity: Severity
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    mode: PolicyMode
+    reason: str = ""
+    ticket_id: str | None = None
+    operator_present: bool = False
+    approved_actions: list[MCPAction] = Field(default_factory=list)
+    pending_actions: list[MCPAction] = Field(default_factory=list)
+    rate_limited_actions: list[MCPAction] = Field(default_factory=list)
+    evaluated_at: datetime = Field(default_factory=utc_now)
 
 
 class MCPActionResult(BaseModel):
@@ -250,6 +273,7 @@ class Incident(BaseModel):
     events: list[SecurityEvent] = Field(default_factory=list)
     vision: VisionEvidence | None = None
     decision: OODADecision | None = None
+    policy: PolicyOutcome | None = None
     action_results: list[MCPActionResult] = Field(default_factory=list)
     forensics: ForensicsReport | None = None
     patch: PatchResult | None = None

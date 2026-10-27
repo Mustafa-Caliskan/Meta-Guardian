@@ -31,13 +31,13 @@ Webcam / USB / target API
   Vision evidence (SAM 3.1)        (backend/vision)
           │
           ▼
-  OODA decision + MCP actions      (Muse Glimmer 30B)
+  OODA decision + MCP actions      (Muse Glimmer)
           │
           ▼
-  1M-context forensics             (Muse Spark Open)
+  1M-context forensics             (Muse Spark 1.3 / Spark Open)
           │
           ▼
-  Live auto-patch + replay test    (Muse Code)
+  Live auto-patch + replay test    (Muse Spark 1.3 plans the rule)
 ```
 
 ## Repository layout
@@ -107,6 +107,37 @@ python scripts/smoke_test_providers.py --probe
 `muse-spark-1.3`. **Muse Code is a terminal/CI coding agent, not an API model** —
 use `muse-spark-1.3` to generate patch plans.
 
+## Day 3 pipeline
+
+```
+event -> capture_frame() -> detect_motion() -> SAMBridge.segment()
+      -> OODAAgent.observe/orient -> decide (LLM, JSON validated)
+      -> PolicyEngine.evaluate (tickets + confidence + rate limit)
+      -> MCPServer.call_tool (real containment) -> Incident
+```
+
+- **Vision** (`backend/vision/`): one frame per event, OpenCV webcam with a
+  recorded-scenario fallback, frame-diff ROI, and a `sam-3.1` Responses-API
+  client. Without `MODEL_API_KEY` it uses the diff mask offline.
+- **MCP** (`backend/edge/mcp_server.py`): `quarantine_usb_file`,
+  `block_ip_on_gateway`, `revoke_session_token`, `kill_process` - all real side
+  effects, plus a JSON-RPC `tools/list` / `tools/call` surface.
+- **Policy** (`backend/edge/policy_engine.py`): change-ticket authorization,
+  confidence bands (`>= 0.85` auto, `0.50-0.85` approval, `< 0.50` monitor) and
+  a sliding-window rate limiter. The LLM can propose, never self-authorize.
+- **OODA** (`backend/edge/ooda_agent.py`): validates the LLM JSON, replaces
+  hallucinated IPs/sessions with evidence, executes only policy-approved actions
+  and returns a fully populated `Incident` (scenarios A/B/C).
+
+Scenario C (authorized maintenance) needs a local ticket file:
+
+```powershell
+Copy-Item data/change_tickets.example.json data/change_tickets.json
+# edit the window so it covers "now", then run the OODA loop
+```
+
+`data/change_tickets.json` is git-ignored; only the example is committed.
+
 ## Documentation
 
 - [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — adversaries, trust boundaries,
@@ -116,7 +147,7 @@ use `muse-spark-1.3` to generate patch plans.
 
 - [x] Day 1 — repository skeleton, configuration, shared schemas, LLM provider layer (mock / replay / live / record)
 - [x] Day 2 — target service (`200 → 403` ready), USB/network watchers, deterministic 30-day SIEM archive with line-verified citations
-- [ ] Day 3 — vision pipeline, MCP quarantine tools, policy engine, OODA agent
+- [x] Day 3 — vision pipeline, MCP quarantine tools, policy engine, OODA agent (93 tests, live containment verified)
 - [ ] Day 4 — SOC cockpit + WebSocket stream (MVP)
 - [ ] Day 5 — sanitizer + 1M-context forensics
 - [ ] Day 6 — live hot-patch and `200 → 403` verification
