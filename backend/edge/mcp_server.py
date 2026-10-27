@@ -85,6 +85,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
+def _split_names(raw: str) -> set[str]:
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
 def _compact_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -104,6 +108,8 @@ class MCPServer:
         timeout: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         process_factory: Callable[[int], Any] | None = None,
+        internal_token: str | None = None,
+        allowed_process_names: set[str] | None = None,
     ) -> None:
         settings = get_settings()
         self.target_base_url = (target_base_url or settings.target_base_url).rstrip("/")
@@ -111,17 +117,31 @@ class MCPServer:
         self.timeout = timeout if timeout is not None else settings.action_timeout
         self.transport = transport
         self._process_factory = process_factory or psutil.Process
+        self.internal_token = (
+            settings.internal_api_token if internal_token is None else internal_token
+        )
+        self.allowed_process_names = {
+            name.lower()
+            for name in (
+                allowed_process_names
+                if allowed_process_names is not None
+                else _split_names(settings.kill_allowlist)
+            )
+        }
 
     # -- gateway helpers -----------------------------------------------------
 
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        headers = (
+            {"x-internal-token": self.internal_token} if self.internal_token else None
+        )
         try:
             async with httpx.AsyncClient(
                 base_url=self.target_base_url,
                 timeout=self.timeout,
                 transport=self.transport,
             ) as client:
-                response = await client.post(path, json=payload)
+                response = await client.post(path, json=payload, headers=headers)
                 response.raise_for_status()
                 body = response.json()
         except httpx.HTTPStatusError as exc:
@@ -212,6 +232,13 @@ class MCPServer:
         except ValueError:
             return self._failure(action, str(ip), "invalid IP address")
 
+        if ipaddress.ip_address(normalized).is_loopback or ipaddress.ip_address(
+            normalized
+        ).is_unspecified:
+            return self._failure(
+                action, normalized, "refusing to block loopback/unspecified address"
+            )
+
         try:
             body = await self._post(
                 "/internal/gateway/block_ip",
@@ -267,6 +294,12 @@ class MCPServer:
         try:
             process = self._process_factory(pid_int)
             name = process.name()
+            if self.allowed_process_names and name.lower() not in self.allowed_process_names:
+                return self._failure(
+                    action,
+                    str(pid_int),
+                    f"process {name!r} is not on the kill allowlist",
+                )
             process.terminate()
             try:
                 process.wait(timeout=3)

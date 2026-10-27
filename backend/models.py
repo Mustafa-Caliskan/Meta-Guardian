@@ -90,6 +90,10 @@ class VisionEvidence(BaseModel):
     frame_path: str | None = None
     mask_path: str | None = None
     model: str = "sam-3.1"
+    method: str = "baseline_diff+sam-3.1"
+    motion_ratio: float = 0.0
+    frame_source: str = ""
+    presence_known: bool = True
 
 
 class ChangeTicket(BaseModel):
@@ -184,7 +188,10 @@ class ForensicsReport(BaseModel):
     vulnerable_code: str | None = None
     summary: str = ""
     citations: list[Citation] = Field(default_factory=list)
-    model: str = "muse-spark-open-1m"
+    citations_verified: bool = False
+    recon_verified: bool = False
+    archive_lines_scanned: int = 0
+    model: str = "muse-spark-1.3"
     latency_ms: float = 0.0
     input_tokens: int = 0
     created_at: datetime = Field(default_factory=utc_now)

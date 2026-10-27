@@ -86,6 +86,11 @@ Trust boundaries:
 `scripts/benchmark_latency.py` emits a `KPIReport` for each scenario. Targets are
 checked in CI-style tests where deterministic; live targets are recorded.
 
+Measured values are written to `data/runtime/kpi_report.json`. The script labels
+stub timings when the target is down and labels the bandwidth figure as an
+arithmetic assumption. Nothing in this table is published as measured unless the
+benchmark produced it.
+
 | KPI | Definition | Target | How measured |
 |---|---|---|---|
 | **MTTD (edge)** | trigger timestamp → correlated `SecurityEvent` | < 2 s | event timestamps |
@@ -106,3 +111,28 @@ checked in CI-style tests where deterministic; live targets are recorded.
 - They separate **edge latency** (local, sub-second) from **cloud latency**
   (forensics, seconds), which is the honest architecture story.
 - They prove the **negative** case (Scenario C) instead of only the happy path.
+
+
+## 5. Hardening implemented after review
+
+| Risk | Mitigation | Where |
+|---|---|---|
+| Correlator missing: sensors never woke the agent | `Correlator` bundles events and schedules the OODA run | `backend/edge/correlator.py` |
+| `operator_present` hard-coded by scenario | Pixel motion vs calibrated baseline; SAM on the captured frame; `presence unknown` on scene mismatch | `backend/vision/operator.py`, `backend/main.py` |
+| Replaying stale log lines on startup | `NetWatcher(ignore_history=True)` starts at EOF | `backend/edge/usb_net_watcher.py` |
+| Blocking loopback kills the control plane | Loopback/unspecified IPs refused by MCP and gateway | `backend/edge/mcp_server.py`, `backend/target_service.py` |
+| Control plane unauthenticated | Optional shared secret on all `/internal/*` endpoints | `backend/target_service.py` |
+| Forged attacker IP | `X-Forwarded-For` honoured only when `TRUST_FORWARDED_FOR=1`; raw peer always logged | `backend/target_service.py` |
+| Unbounded process killing | Optional `KILL_ALLOWLIST`; system PIDs always refused | `backend/edge/mcp_server.py` |
+| Hallucinated log citations | Line + excerpt verification; deterministic manifest fallback | `backend/cloud/forensics.py` |
+| Unsafe auto-patch | Allowlisted deterministic template, replay proof, automatic rollback | `backend/cloud/patcher.py` |
+| Lost SOC history on restart | Incidents persisted as JSON | `backend/main.py` |
+
+## 6. What the demo must not claim
+
+- That `/api/simulate` is real detection. It is a labelled demo injector.
+- That presence detection is biometric identification. It is motion analysis.
+- That the bandwidth number is measured. It is arithmetic.
+- That a vendor agent (Wazuh/CrowdStrike) cannot do parts of this. The novelty is
+  the combined physical + network correlation with a deterministic action gate
+  and verifiable self-patching, not any single component.

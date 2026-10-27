@@ -219,6 +219,20 @@
       inspect.addEventListener("click", () => loadIncident(incident.id));
       actions.appendChild(inspect);
 
+      const analyze = document.createElement("button");
+      analyze.className = "btn";
+      analyze.textContent = incident.forensics ? "RE-ANALYZE" : "ANALYZE";
+      analyze.addEventListener("click", () => runForensics(incident.id, analyze));
+      actions.appendChild(analyze);
+
+      if (incident.forensics) {
+        const patch = document.createElement("button");
+        patch.className = "btn";
+        patch.textContent = incident.patch ? "RE-PATCH" : "PATCH";
+        patch.addEventListener("click", () => runPatch(incident.id, patch));
+        actions.appendChild(patch);
+      }
+
       if (incident.status === "open") {
         const dismiss = document.createElement("button");
         dismiss.className = "btn danger";
@@ -336,6 +350,18 @@
       meta: results.length ? "" : '<span class="pill warn">no side effects</span>',
     });
 
+    const forensics = incident.forensics;
+    if (forensics) {
+      steps.push({
+        kind: "pol",
+        head: `Cloud forensics ? ${esc(forensics.model || "model")}`,
+        body: `${esc((forensics.summary || "").slice(0, 240))}`,
+        meta: `<span class="pill ${forensics.citations_verified ? "ok" : "bad"}">${(forensics.citations || []).length} citation(s) ${forensics.citations_verified ? "verified" : "unverified"}</span>
+               <span class="pill">${forensics.archive_lines_scanned || 0} lines</span>
+               <span class="pill">${Math.round(forensics.latency_ms || 0)} ms</span>`,
+      });
+    }
+
     steps.push({
       kind: "gate",
       head: "Status",
@@ -438,6 +464,40 @@
       pushLocalEvent("error", `approval failed: ${error.message}`);
     } finally {
       button.disabled = false;
+    }
+  }
+
+  async function runForensics(id, button) {
+    button.disabled = true;
+    try {
+      const incident = await api(`/api/incidents/${encodeURIComponent(id)}/forensics`, {
+        method: "POST",
+      });
+      state.latest = incident;
+      await loadIncidents();
+      renderTimeline(incident);
+    } catch (error) {
+      pushLocalEvent("error", `forensics failed: ${error.message}`);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function runPatch(id, button) {
+    button.disabled = true;
+    button.textContent = "PATCHING?";
+    try {
+      const incident = await api(`/api/incidents/${encodeURIComponent(id)}/patch`, {
+        method: "POST",
+      });
+      state.latest = incident;
+      await Promise.all([loadIncidents(), loadSnapshot(), loadGateway()]);
+      renderTimeline(incident);
+    } catch (error) {
+      pushLocalEvent("error", `patch failed: ${error.message}`);
+    } finally {
+      button.disabled = false;
+      button.textContent = "PATCH";
     }
   }
 

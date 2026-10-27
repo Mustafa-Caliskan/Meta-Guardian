@@ -51,12 +51,15 @@ class MockLLM(BaseLLM):
     @staticmethod
     def _ooda(prompt: str) -> dict:
         compact = prompt.replace(" ", "")
-        if '"operator_present":false' in compact:
-            classification = "GHOST_ATTACK"
-            reasoning = "Critical admin action executed while no authorized operator was visible."
-        elif '"change_ticket_valid":true' in compact:
+        if '"change_ticket_valid":true' in compact:
             classification = "BENIGN_AUTHORIZED"
             reasoning = "Change ticket covers the event window and an operator is present."
+        elif (
+            '"operator_present":false' in compact
+            and "admin_command" in compact
+        ):
+            classification = "GHOST_ATTACK"
+            reasoning = "Critical admin action executed while no authorized operator was visible."
         else:
             classification = "THREAT_CRITICAL"
             reasoning = "Unknown USB payload combined with data exfiltration attempt."

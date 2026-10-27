@@ -17,6 +17,7 @@ Run standalone:
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import threading
@@ -27,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Deque
 
-from fastapi import FastAPI, Header, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -86,8 +87,8 @@ class GatewayState:
             self.seq = 0
             if log_path is not None:
                 self.log_path = Path(log_path).resolve()
-                self.log_path.parent.mkdir(parents=True, exist_ok=True)
-                self.log_path.write_text("", encoding="utf-8")
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            self.log_path.write_text("", encoding="utf-8")
 
     def record(self, entry: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
@@ -164,10 +165,38 @@ app = FastAPI(
 )
 
 
+def resolve_client_ip(request: Request) -> tuple[str, str | None]:
+    """Return (effective_ip, forwarded_for).
+
+    Trusting ``X-Forwarded-For`` is opt-in (``TRUST_FORWARDED_FOR=1``) because
+    anyone can forge that header. In the demo a proxy script sets it so the
+    attacker IP stays realistic even though the TCP peer is 127.0.0.1; with the
+    flag off the raw peer address is used and logged truthfully.
+    """
+    peer = request.client.host if request.client else "unknown"
+    forwarded = request.headers.get("x-forwarded-for")
+    if not settings.trust_forwarded_for or not forwarded:
+        return peer, forwarded
+    candidate = forwarded.split(",")[0].strip()
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return peer, forwarded
+    return candidate, forwarded
+
+
+async def require_internal_token(
+    x_internal_token: str | None = Header(default=None),
+) -> None:
+    """Protect the control plane when INTERNAL_API_TOKEN is configured."""
+    if settings.internal_api_token and x_internal_token != settings.internal_api_token:
+        raise HTTPException(status_code=401, detail="invalid internal API token")
+
+
 @app.middleware("http")
 async def audit_middleware(request: Request, call_next):
     started = time.perf_counter()
-    ip = request.client.host if request.client else "unknown"
+    ip, forwarded_for = resolve_client_ip(request)
     token = request.headers.get("x-session-token")
 
     with STATE.lock:
@@ -177,6 +206,7 @@ async def audit_middleware(request: Request, call_next):
         entry = {
             "ts": utc_iso(),
             "ip": ip,
+            "forwarded_for": forwarded_for,
             "method": request.method,
             "path": request.url.path,
             "query": request.url.query,
@@ -198,6 +228,7 @@ async def audit_middleware(request: Request, call_next):
         {
             "ts": utc_iso(),
             "ip": ip,
+            "forwarded_for": forwarded_for,
             "method": request.method,
             "path": request.url.path,
             "query": request.url.query,
@@ -313,7 +344,7 @@ async def admin_command(
 # ---------------------------------------------------------------------------
 
 
-@app.get("/internal/state")
+@app.get("/internal/state", dependencies=[Depends(require_internal_token)])
 async def internal_state() -> dict[str, Any]:
     with STATE.lock:
         return {
@@ -328,7 +359,7 @@ async def internal_state() -> dict[str, Any]:
         }
 
 
-@app.get("/internal/requests")
+@app.get("/internal/requests", dependencies=[Depends(require_internal_token)])
 async def internal_requests(since: int = 0, limit: int = 200) -> dict[str, Any]:
     with STATE.lock:
         entries = [entry for entry in STATE.recent if entry["seq"] > since]
@@ -340,14 +371,34 @@ class IPRequest(BaseModel):
     reason: str = ""
 
 
-@app.post("/internal/gateway/block_ip")
+def is_loopback(ip: str) -> bool:
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_unspecified
+
+
+@app.post("/internal/gateway/block_ip", dependencies=[Depends(require_internal_token)])
 async def block_ip(payload: IPRequest) -> dict[str, Any]:
+    try:
+        normalized = str(ipaddress.ip_address(payload.ip.strip()))
+    except ValueError:
+        return JSONResponse(status_code=422, content={"detail": "invalid IP address"})
+
+    if is_loopback(normalized):
+        # Blocking loopback would take down the control plane itself.
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "refusing to block a loopback/unspecified address"},
+        )
+
     with STATE.lock:
-        STATE.blocked_ips.add(payload.ip)
-    return {"blocked": True, "ip": payload.ip, "reason": payload.reason}
+        STATE.blocked_ips.add(normalized)
+    return {"blocked": True, "ip": normalized, "reason": payload.reason}
 
 
-@app.post("/internal/gateway/unblock_ip")
+@app.post("/internal/gateway/unblock_ip", dependencies=[Depends(require_internal_token)])
 async def unblock_ip(payload: IPRequest) -> dict[str, Any]:
     with STATE.lock:
         STATE.blocked_ips.discard(payload.ip)
@@ -359,7 +410,7 @@ class SessionRequest(BaseModel):
     reason: str = ""
 
 
-@app.post("/internal/gateway/revoke_session")
+@app.post("/internal/gateway/revoke_session", dependencies=[Depends(require_internal_token)])
 async def revoke_session(payload: SessionRequest) -> dict[str, Any]:
     with STATE.lock:
         STATE.revoked_sessions.add(payload.session)
@@ -371,7 +422,7 @@ class RuleRequest(BaseModel):
     rule: WAFRule
 
 
-@app.post("/internal/gateway/apply_rule")
+@app.post("/internal/gateway/apply_rule", dependencies=[Depends(require_internal_token)])
 async def apply_rule(payload: RuleRequest) -> dict[str, Any]:
     rule = payload.rule
     if not rule.blocked_markers and not rule.require_session:
@@ -392,7 +443,7 @@ async def apply_rule(payload: RuleRequest) -> dict[str, Any]:
     }
 
 
-@app.post("/internal/gateway/rollback")
+@app.post("/internal/gateway/rollback", dependencies=[Depends(require_internal_token)])
 async def rollback() -> dict[str, Any]:
     with STATE.lock:
         STATE.rule = None
@@ -402,7 +453,7 @@ async def rollback() -> dict[str, Any]:
     return {"rolled_back": True, "revision": revision}
 
 
-@app.post("/internal/reset")
+@app.post("/internal/reset", dependencies=[Depends(require_internal_token)])
 async def reset(log_path: str | None = None) -> dict[str, Any]:
     STATE.reset(Path(log_path) if log_path else None)
     return {"reset": True, "log_path": str(STATE.log_path)}

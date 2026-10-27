@@ -22,6 +22,7 @@ class OpenAICompatLLM(BaseLLM):
         temperature: float = 0.2,
         max_tokens: int = 2048,
         extra_headers: dict[str, str] | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         if not base_url:
             raise ValueError("base_url is required")
@@ -34,6 +35,7 @@ class OpenAICompatLLM(BaseLLM):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.extra_headers = extra_headers or {}
+        self.reasoning_effort = reasoning_effort
 
     def _headers(self) -> dict[str, str]:
         headers = {
@@ -62,6 +64,8 @@ class OpenAICompatLLM(BaseLLM):
         }
         if json_mode:
             body["response_format"] = {"type": "json_object"}
+        if self.reasoning_effort:
+            body["reasoning_effort"] = self.reasoning_effort
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(
@@ -73,9 +77,17 @@ class OpenAICompatLLM(BaseLLM):
             data = response.json()
 
         try:
-            text = data["choices"][0]["message"]["content"] or ""
+            message = data["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:
             raise ValueError(f"unexpected LLM response shape: {data}") from exc
+
+        text = message.get("content") or ""
+        reasoning = message.get("reasoning_content") or ""
+        # Reasoning models can spend the whole token budget in reasoning_content,
+        # leaving content empty. Only use reasoning as a fallback when it clearly
+        # contains the structured answer.
+        if not text.strip() and "{" in reasoning:
+            text = reasoning
 
         usage = data.get("usage") or {}
         return LLMResponse(

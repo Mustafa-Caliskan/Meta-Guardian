@@ -42,7 +42,10 @@ async def test_mock_ooda_detects_authorized_maintenance():
 async def test_mock_ghost_attack_has_no_operator():
     llm = MockLLM()
     payload, _ = await llm.complete_json(
-        _user('{"operator_present": false, "change_ticket_valid": false}'), task="ooda"
+        _user(
+            '{"operator_present": false, "change_ticket_valid": false, "type": "admin_command"}'
+        ),
+        task="ooda",
     )
     assert payload["classification"] == "GHOST_ATTACK"
 

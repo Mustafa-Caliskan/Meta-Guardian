@@ -116,7 +116,7 @@ def test_net_watcher_emits_only_suspicious_entries(tmp_path: Path):
             },
         ],
     )
-    watcher = NetWatcher(EventBus(), log)
+    watcher = NetWatcher(EventBus(), log, ignore_history=False)
     events = watcher.poll_once()
 
     assert len(events) == 1
@@ -141,7 +141,7 @@ def test_net_watcher_is_incremental_and_survives_truncation(tmp_path: Path):
             }
         ],
     )
-    watcher = NetWatcher(EventBus(), log)
+    watcher = NetWatcher(EventBus(), log, ignore_history=False)
     assert len(watcher.poll_once()) == 1
     assert watcher.poll_once() == []
 

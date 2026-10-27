@@ -1,3 +1,8 @@
+from .operator import (
+    BaselineUnavailableError,
+    PresenceDetector,
+    PresenceResult,
+)
 from .roi_detector import (
     MotionResult,
     compute_diff,
@@ -24,6 +29,9 @@ __all__ = [
     "detect_motion",
     "find_roi",
     "mask_from_roi",
+    "BaselineUnavailableError",
+    "PresenceDetector",
+    "PresenceResult",
     "DEFAULT_PROMPT",
     "SAMBridge",
     "SegmentationResult",

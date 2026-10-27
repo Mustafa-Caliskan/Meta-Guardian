@@ -85,11 +85,33 @@ def test_revoked_session_is_rejected(client: TestClient):
     assert response.status_code == 401
 
 
-def test_blocked_ip_gets_403(client: TestClient):
-    client.post("/internal/gateway/block_ip", json={"ip": "testclient"})
-    response = client.get("/api/v1/ops/flights")
+def test_blocked_ip_gets_403(client: TestClient, monkeypatch):
+    import dataclasses
+
+    from backend import target_service
+
+    patched = dataclasses.replace(target_service.settings, trust_forwarded_for=True)
+    monkeypatch.setattr(target_service, "settings", patched)
+
+    headers = {"x-forwarded-for": "198.51.100.9"}
+    blocked = client.post("/internal/gateway/block_ip", json={"ip": "198.51.100.9"})
+    assert blocked.status_code == 200
+    assert blocked.json()["blocked"] is True
+
+    response = client.get("/api/v1/ops/flights", headers=headers)
     assert response.status_code == 403
     assert "blocked" in response.text
+
+
+def test_loopback_cannot_be_blocked(client: TestClient):
+    response = client.post("/internal/gateway/block_ip", json={"ip": "127.0.0.1"})
+    assert response.status_code == 422
+    assert "loopback" in response.json()["detail"]
+
+
+def test_invalid_ip_cannot_be_blocked(client: TestClient):
+    response = client.post("/internal/gateway/block_ip", json={"ip": "not-an-ip"})
+    assert response.status_code == 422
 
 
 def test_rollback_restores_vulnerable_state(client: TestClient):

@@ -113,7 +113,7 @@ python scripts/smoke_test_providers.py --probe
 `muse-spark-1.3`. **Muse Code is a terminal/CI coding agent, not an API model** —
 use `muse-spark-1.3` to generate patch plans.
 
-## Day 3 pipeline
+## Detection pipeline (Days 3-6)
 
 ```
 event -> capture_frame() -> detect_motion() -> SAMBridge.segment()
@@ -131,9 +131,109 @@ event -> capture_frame() -> detect_motion() -> SAMBridge.segment()
 - **Policy** (`backend/edge/policy_engine.py`): change-ticket authorization,
   confidence bands (`>= 0.85` auto, `0.50-0.85` approval, `< 0.50` monitor) and
   a sliding-window rate limiter. The LLM can propose, never self-authorize.
+- **Correlator** (`backend/edge/correlator.py`): the bridge that was missing.
+  Watchers publish individual events; the correlator bundles them (USB + network
+  within 30 s, admin command, or a delayed USB-only bundle) and wakes the agent.
+  A short per-signature cooldown stops event storms from spawning duplicates.
+- **Presence** (`backend/vision/operator.py`): `operator_present` is computed
+  from pixels ? motion against a calibrated baseline ? then the ROI is sent to
+  SAM 3.1. It is a motion heuristic, not face recognition; if the frame differs
+  from the baseline by more than 45% it reports *presence unknown* instead of
+  guessing (this prevents false Ghost Attack verdicts).
 - **OODA** (`backend/edge/ooda_agent.py`): validates the LLM JSON, replaces
   hallucinated IPs/sessions with evidence, executes only policy-approved actions
   and returns a fully populated `Incident` (scenarios A/B/C).
+- **Forensics** (`backend/cloud/forensics.py`): sanitized bundle + prioritized
+  archive excerpts go to the 1M-context model. **Every citation is verified
+  against the real file and line**; invented lines are dropped and the
+  deterministic manifest report is used instead. `earliest_discovery` is
+  cross-checked against the archive manifest.
+- **Patcher** (`backend/cloud/patcher.py`): the model never writes executable
+  code. It selects an allowlisted template, the rule is hot-loaded, the *same*
+  attack is replayed and must return 403/401. If it does not, the patch is
+  rolled back automatically. A stable rule fingerprint is recorded.
+
+## Real detection loop (not the demo button)
+
+The cockpit has a scenario injector, and it is labelled as such: it injects
+synthetic *events* but still runs real vision, policy and containment. Real
+detection does not depend on it.
+
+```powershell
+# terminal 1
+python -m backend.target_service
+# terminal 2 (watchers on by default)
+python -m backend.main
+# terminal 3: real HTTP attack against :8001, waits for the incident, patches
+python scripts/trigger_attack.py --reset --exfil --watch --patch
+```
+
+`trigger_attack.py` never calls `/api/simulate`. It sends real requests; the
+NetWatcher tails the audit log; the correlator builds the incident; the agent
+decides; MCP blocks the IP and revokes the session; the patcher proves
+`HTTP 200 -> HTTP 403`.
+
+To keep the attacker IP realistic behind a local proxy:
+
+```powershell
+$env:TRUST_FORWARDED_FOR="1"          # opt-in, off by default
+$env:INTERNAL_API_TOKEN="dev-token"   # protects /internal/* on the target
+python scripts/trigger_attack.py --exfil --xff 203.0.113.66 --watch --patch
+```
+
+## Recording replay insurance
+
+`LLM_MODE=replay` is only useful with real recordings. This repository ships
+two, recorded against Baseten `meta-models/muse-spark-open-1026`:
+
+```powershell
+python scripts/record_fixtures.py --provider baseten --model meta-models/muse-spark-open-1026
+python scripts/record_fixtures.py --list
+```
+
+- `data/fixtures/ooda.json` ? real edge decision (`THREAT_CRITICAL`)
+- `data/fixtures/forensics.json` ? real report with line-verified citations
+
+Patch planning is intentionally **not** recorded: it is deterministic and does
+not ask a model for code.
+
+## Calibrate operator presence
+
+```powershell
+# step away from the desk, then:
+python scripts/calibrate_baseline.py
+$env:BASELINE_FRAME="data/runtime/baseline.png"
+```
+
+The default baseline is the synthetic desk used by recorded scenarios. With a
+real webcam, an uncalibrated baseline is correctly reported as *presence
+unknown* rather than a confident wrong answer.
+
+## Measured KPIs
+
+```powershell
+python scripts/benchmark_latency.py            # mock LLM, real pipeline
+python scripts/benchmark_latency.py --patch    # adds patch + 200->403 verification
+```
+
+Writes `data/runtime/kpi_report.json` with MTTD, MTTC, patch latency, end-to-end
+latency, precision/recall over A/B/C and the assumed bandwidth saving. The script
+labels stub timings when the target is down; it never presents them as real.
+
+Last local run (Windows, mock LLM, real target on `:8001`, `--patch`):
+
+| Metric | Value |
+|---|---|
+| MTTD (edge correlation) | 0.20 ms |
+| MTTC (containment, 3 actions incl. HTTP) | 816 ms |
+| Patch + replay verification | 1 460 ms |
+| End-to-end (trigger -> 403 proven) | 1 758 ms |
+| Precision / recall (A, B, C) | 1.00 / 1.00 |
+| False positives on Scenario C | 0 |
+| Patch verified | `HTTP 200 -> 403` |
+
+These are single-machine numbers from one run, not a benchmark suite. Live LLM
+mode adds model latency on top (the recorded OODA call took ~2.8 s).
 
 Scenario C (authorized maintenance) needs a local ticket file:
 
@@ -184,10 +284,24 @@ with `Path.write_bytes`.
 - [x] Day 1 — repository skeleton, configuration, shared schemas, LLM provider layer (mock / replay / live / record)
 - [x] Day 2 — target service (`200 → 403` ready), USB/network watchers, deterministic 30-day SIEM archive with line-verified citations
 - [x] Day 3 — vision pipeline, MCP quarantine tools, policy engine, OODA agent (93 tests, live containment verified)
-- [x] Day 4 — FastAPI control center, WebSocket stream, dark SOC cockpit, approval flow (110 tests, live MVP verified)
-- [ ] Day 5 — sanitizer + 1M-context forensics
-- [ ] Day 6 — live hot-patch and `200 → 403` verification
-- [ ] Day 7 — live runs, benchmarks, feature freeze
+- [x] Day 4 — FastAPI control center, WebSocket stream, dark SOC cockpit, approval flow
+- [x] Day 5 — correlator, pixel-based presence detection, sanitizer, citation-verified 1M forensics
+- [x] Day 6 — real trigger script, live auto-patch with `200 → 403` verification + rollback, KPI benchmark, gateway hardening
+- [ ] Day 7 — live runs, feature freeze, video
+
+## Known limitations (stated on purpose)
+
+- Operator presence is a **motion heuristic** against a calibrated baseline. If
+  the camera moved or lighting changed, the system says *presence unknown*
+  instead of guessing.
+- The attacker, victim and defender run on one host. `X-Forwarded-For` is an
+  opt-in demo affordance, not a real proxy.
+- The gateway blocklist and revoked sessions are in-memory; a target restart
+  clears them. Incidents *are* persisted to `data/runtime/incidents/`.
+- The bandwidth-saving number is arithmetic (1 frame/event vs 30 FPS for 30 s),
+  not a network measurement.
+- Cloud output is verified, not trusted: citations must match real lines and the
+  patch must prove a 403, otherwise the system falls back or rolls back.
 
 ## License
 

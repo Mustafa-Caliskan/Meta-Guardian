@@ -15,6 +15,8 @@ env/
 # Runtime artefacts
 data/fixtures/*.json
 !data/fixtures/.gitkeep
+!data/fixtures/ooda.json
+!data/fixtures/forensics.json
 data/history_logs/*.log
 data/history_logs/*.json
 !data/history_logs/.gitkeep

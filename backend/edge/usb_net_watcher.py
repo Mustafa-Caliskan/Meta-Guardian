@@ -278,11 +278,14 @@ class NetWatcher:
         log_path: Path | str | None = None,
         *,
         poll_interval: float = 0.5,
+        ignore_history: bool = True,
     ) -> None:
         self.bus = bus
         self.log_path = Path(log_path or get_settings().request_log_path)
         self.poll_interval = poll_interval
+        self.ignore_history = ignore_history
         self._offset = 0
+        self._primed = False
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
@@ -314,6 +317,13 @@ class NetWatcher:
 
         events: list[SecurityEvent] = []
         size = self.log_path.stat().st_size
+        if not self._primed:
+            self._primed = True
+            if self.ignore_history:
+                # Starting from the end prevents replaying yesterday's attacks on
+                # process start (which would block our own control plane).
+                self._offset = size
+                return []
         if size < self._offset:
             self._offset = 0
 

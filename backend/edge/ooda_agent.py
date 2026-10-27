@@ -142,6 +142,7 @@ class OODAAgent:
         moment: datetime,
     ) -> dict[str, Any]:
         operator_present = bool(vision and vision.operator_present)
+        presence_known = bool(vision and vision.presence_known)
         ticket = self.tickets.find_covering(moment)
         ticket_valid = bool(ticket and operator_present)
 
@@ -159,6 +160,7 @@ class OODAAgent:
                 if ticket and operator_present
                 else None
             ),
+            "presence_known": presence_known,
             "event_count": len(events),
             "events": [
                 self._event_digest(event) for event in events[:MAX_EVIDENCE_EVENTS]

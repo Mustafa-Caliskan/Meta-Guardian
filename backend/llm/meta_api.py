@@ -43,6 +43,7 @@ class MetaAPILLM(BaseLLM):
                 timeout=self.settings.request_timeout,
                 temperature=self.settings.temperature,
                 max_tokens=self.settings.max_tokens,
+                reasoning_effort=self.settings.reasoning_effort or None,
             )
         elif provider == "baseten":
             client = OpenAICompatLLM(
@@ -52,6 +53,7 @@ class MetaAPILLM(BaseLLM):
                 timeout=self.settings.request_timeout,
                 temperature=self.settings.temperature,
                 max_tokens=self.settings.max_tokens,
+                reasoning_effort=self.settings.reasoning_effort or None,
             )
         else:
             client = OpenAICompatLLM(
@@ -61,6 +63,7 @@ class MetaAPILLM(BaseLLM):
                 timeout=self.settings.request_timeout,
                 temperature=self.settings.temperature,
                 max_tokens=self.settings.max_tokens,
+                reasoning_effort=self.settings.reasoning_effort or None,
             )
         self._clients[cache_key] = client
         return client

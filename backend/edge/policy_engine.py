@@ -189,6 +189,7 @@ class PolicyEngine:
         now: datetime | None = None,
     ) -> PolicyOutcome:
         moment = _ensure_tz(now)
+        presence_known = bool(vision and vision.presence_known)
         operator_present = bool(vision and vision.operator_present)
         has_admin = any(event.type is EventType.ADMIN_COMMAND for event in events)
         ticket = self.tickets.find_covering(moment)
@@ -196,7 +197,7 @@ class PolicyEngine:
         if ticket is not None and operator_present:
             return self._authorized(proposed, ticket, operator_present, moment)
 
-        if has_admin and not operator_present:
+        if has_admin and presence_known and not operator_present:
             return self._ghost(proposed, events, operator_present, moment)
 
         classification = proposed.classification

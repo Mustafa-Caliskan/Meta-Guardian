@@ -29,10 +29,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import PROJECT_ROOT, SCENARIOS_DIR, Settings, get_settings
+from .cloud.forensics import ForensicsEngine
+from .cloud.patcher import Patcher
+from .edge.correlator import CorrelationResult, Correlator
 from .edge.mcp_server import MCPServer
 from .edge.ooda_agent import OODAAgent
 from .edge.policy_engine import ChangeTicketStore, PolicyEngine
-from .edge.usb_net_watcher import EventBus, NetWatcher, USBWatcher
+from .edge.usb_net_watcher import EventBus, NetWatcher, USBWatcher, sha256_file
 from .llm.factory import build_llm
 from .models import (
     ChangeTicket,
@@ -48,7 +51,7 @@ from .models import (
     VisionEvidence,
     utc_now,
 )
-from .vision import SAMBridge, capture_frame
+from .vision import PresenceDetector, SAMBridge, capture_frame, load_frame
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 MAX_EVENT_HISTORY = 500
@@ -128,11 +131,27 @@ class AppState:
             change_tickets=self.tickets,
         )
         self.sam = SAMBridge()
+        self.forensics = ForensicsEngine(self.agent.llm)
+        self.patcher = Patcher()
 
         self.usb_watcher = USBWatcher(self.bus)
         self.net_watcher = NetWatcher(self.bus, self.settings.request_log_path)
+        self.correlator = Correlator(
+            window_seconds=self.settings.correlation_window_seconds,
+            cooldown_seconds=self.settings.correlation_cooldown_seconds,
+        )
+        self.presence = PresenceDetector(
+            baseline_path=self.settings.baseline_frame_path,
+            motion_threshold=self.settings.operator_motion_threshold,
+        )
         self._tasks: list[asyncio.Task] = []
+        self._pipeline_tasks: set[asyncio.Task] = set()
+        self._pipeline_lock = asyncio.Lock()
         self._bus_subscribed = False
+        self._flush_task: asyncio.Task | None = None
+        self.real_incidents = 0
+        if self.settings.persist_incidents:
+            self._load_persisted()
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -144,21 +163,79 @@ class AppState:
             await self.usb_watcher.start()
             await self.net_watcher.start()
             self._tasks = [t for t in (self.usb_watcher._task, self.net_watcher._task) if t]
+        if self._flush_task is None or self._flush_task.done():
+            self._flush_task = asyncio.create_task(self._flush_loop(), name="correlator-flush")
 
     async def stop(self) -> None:
         await self.usb_watcher.stop()
         await self.net_watcher.stop()
+        if self._flush_task is not None:
+            self._flush_task.cancel()
+            self._flush_task = None
+        for task in list(self._pipeline_tasks):
+            task.cancel()
+        self._pipeline_tasks.clear()
         for task in self._tasks:
             task.cancel()
         self._tasks = []
 
-    # -- bus -> websocket ----------------------------------------------------
+    async def _flush_loop(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(2.0)
+                for result in self.correlator.flush():
+                    self._schedule_bundle(result)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - loop must survive
+                self._log_vision_error("correlator", "flush", exc)
+
+    # -- bus -> websocket + pipeline -----------------------------------------
 
     async def _on_event(self, event: SecurityEvent) -> None:
+        await self._emit_event(event)
+        result = self.correlator.observe(event)
+        if result is not None:
+            self._schedule_bundle(result)
+
+    async def _emit_event(self, event: SecurityEvent) -> None:
         self.events.append(event)
         await self.connections.broadcast(
             {"type": "event", "event": event.model_dump(mode="json")}
         )
+
+    def _schedule_bundle(self, result: "CorrelationResult") -> None:
+        task = asyncio.create_task(self._run_bundle(result), name="ooda-bundle")
+        self._pipeline_tasks.add(task)
+        task.add_done_callback(self._pipeline_tasks.discard)
+
+    async def _run_bundle(self, result: "CorrelationResult") -> Incident | None:
+        async with self._pipeline_lock:
+            try:
+                incident = Incident(events=list(result.events))
+                vision = await self.gather_evidence(incident.id, mode="live")
+                incident = await self.agent.run(
+                    result.events,
+                    vision,
+                    now=utc_now(),
+                    scenario=self._scenario_from_reason(result.reason),
+                    incident=incident,
+                )
+                self.real_incidents += 1
+                self._remember(incident)
+                await self.publish_incident(incident)
+                return incident
+            except Exception as exc:  # noqa: BLE001 - never kill the bus
+                self._log_vision_error("pipeline", result.reason, exc)
+                return None
+
+    @staticmethod
+    def _scenario_from_reason(reason: str) -> str:
+        if reason == "admin_command":
+            return "B"
+        if reason in ("usb_plus_network", "usb_payload", "network_attack"):
+            return "A"
+        return "unknown"
 
     async def publish(self, event: SecurityEvent) -> None:
         await self.bus.publish(event)
@@ -181,6 +258,7 @@ class AppState:
             "counts": {
                 "events": len(self.events),
                 "incidents": len(incidents),
+                "real_incidents": self.real_incidents,
                 "contained": sum(
                     1 for inc in incidents if inc.status is IncidentStatus.CONTAINED
                 ),
@@ -231,32 +309,48 @@ class AppState:
     # -- scenarios -----------------------------------------------------------
 
     async def simulate(self, scenario: str) -> Incident:
+        """Demo injector: synthetic *events*, real vision, policy and containment.
+
+        The button is honest about what it is. Events are injected here, but the
+        camera frame is still analyzed by the presence detector and SAM, the
+        policy engine still gates every action, and the MCP tools still perform
+        real side effects. Real detection does not depend on this path: the
+        watchers feed the correlator and the same pipeline automatically.
+        """
         scenario = scenario.upper()
         if scenario not in ("A", "B", "C"):
             raise HTTPException(status_code=422, detail="scenario must be A, B or C")
 
         sandbox = self.runtime_dir / "sim_usb"
         incident = Incident(scenario=scenario)  # type: ignore[arg-type]
-        evidence = self.evidence_dir(incident.id)
-        evidence.mkdir(parents=True, exist_ok=True)
+        self.evidence_dir(incident.id).mkdir(parents=True, exist_ok=True)
+
+        frame_name = {
+            "A": "hand_usb.png",
+            "B": "operator_absent.png",
+            "C": "operator_present.png",
+        }[scenario]
 
         ticket_added: ChangeTicket | None = None
         try:
             if scenario == "A":
                 usb_root = self._prepare_usb_sandbox(sandbox)
                 events = [self._usb_event(usb_root), self._network_event()]
-                vision = self._vision(incident.id, operator_present=True)
             elif scenario == "B":
                 events = [self._admin_event()]
-                vision = self._vision(incident.id, operator_present=False)
             else:
                 ticket_added = self._temporary_ticket()
-                events = [self._usb_event(self._prepare_usb_sandbox(sandbox)), self._network_event()]
-                vision = self._vision(incident.id, operator_present=True)
+                events = [
+                    self._usb_event(self._prepare_usb_sandbox(sandbox)),
+                    self._network_event(),
+                ]
 
             for event in events:
-                await self.publish(event)
+                await self._emit_event(event)
 
+            vision = await self.gather_evidence(
+                incident.id, mode="recorded", recorded_frame=frame_name
+            )
             incident = await self.agent.run(
                 events, vision, now=utc_now(), scenario=scenario, incident=incident
             )
@@ -295,7 +389,7 @@ class AppState:
                         "name": payload_file.name,
                         "path": str(payload_file),
                         "size": payload_file.stat().st_size,
-                        "sha256": "0" * 64,
+                        "sha256": sha256_file(payload_file),
                         "extension": ".ps1",
                     }
                 ],
@@ -336,45 +430,121 @@ class AppState:
             },
         )
 
-    def _vision(self, incident_id: str, *, operator_present: bool) -> VisionEvidence:
+    async def gather_evidence(
+        self,
+        incident_id: str,
+        *,
+        mode: str = "live",
+        recorded_frame: str | None = None,
+    ) -> VisionEvidence:
+        """Capture one frame, compute presence from pixels, then segment with SAM.
+
+        ``mode="live"`` uses the real webcam (with a recorded fallback if no
+        camera exists). ``mode="recorded"`` deliberately replays a scenario
+        frame so the demo injector is deterministic. Both paths run the exact
+        same presence detector and SAM call, so the Ghost Attack decision is
+        derived from the frame, never from a scenario name.
+        """
         target_dir = self.evidence_dir(incident_id)
         target_dir.mkdir(parents=True, exist_ok=True)
         frame_path = target_dir / "frame.png"
         mask_path = target_dir / "mask.png"
 
-        fallback_name = "operator_present.png" if operator_present else "operator_absent.png"
+        provider = self.frame_provider if mode == "live" else (lambda: None)
+        fallback_name = recorded_frame or (
+            "operator_present.png" if mode == "live" else "operator_absent.png"
+        )
+
+        captured = None
         try:
             captured = capture_frame(
                 frame_path,
                 fallback_dir=self.scenarios_dir,
                 fallback_name=fallback_name,
                 warmup_frames=1,
-                provider=self.frame_provider,
+                provider=provider,
             )
-            detail = captured.detail
-        except Exception as exc:  # noqa: BLE001 - cockpit must still work
-            detail = f"frame unavailable: {type(exc).__name__}: {exc}"
+        except Exception as exc:  # noqa: BLE001 - retry with the repo scenarios
             self._log_vision_error(incident_id, "frame", exc)
+            try:
+                captured = capture_frame(
+                    frame_path,
+                    fallback_dir=SCENARIOS_DIR,
+                    fallback_name=fallback_name,
+                    warmup_frames=1,
+                    provider=provider,
+                )
+            except Exception as second:  # noqa: BLE001
+                self._log_vision_error(incident_id, "frame", second)
 
-        roi = [40, 30, 60, 70] if operator_present else [0, 0, 1, 1]
+        if captured is None:
+            return VisionEvidence(
+                operator_present=False,
+                confidence=0.0,
+                description="frame unavailable: presence unknown",
+                frame_path=None,
+                mask_path=None,
+                model=self.settings.sam_model,
+                method="unavailable",
+                presence_known=False,
+                frame_source="none",
+            )
+
+        presence_known = True
         try:
-            self.sam._write_mask(mask_path, _blank_frame(), roi=roi)
-        except Exception as exc:  # noqa: BLE001
-            detail += f"; mask unavailable: {type(exc).__name__}: {exc}"
-            self._log_vision_error(incident_id, "mask", exc)
+            presence = self.presence.detect(captured.image)
+            operator_present = presence.present
+            confidence = presence.confidence
+            motion_ratio = presence.motion_ratio
+            roi = presence.roi
+            description = presence.description
+            method = "baseline_diff"
+            presence_known = presence.reliable
+        except Exception as exc:  # noqa: BLE001 - no baseline means unknown
+            self._log_vision_error(incident_id, "presence", exc)
+            presence_known = False
+            operator_present = False
+            confidence = 0.0
+            motion_ratio = 0.0
+            roi = None
+            description = (
+                "presence unknown: no clean baseline frame "
+                f"({type(exc).__name__})"
+            )
+            method = "unavailable"
+
+        segmentation_roi = roi
+        sam_model = self.settings.sam_model
+        try:
+            segmentation = await self.sam.segment(
+                captured.image,
+                roi=roi,
+                baseline=self.presence.baseline if presence_known else None,
+                mask_path=mask_path,
+            )
+            sam_model = segmentation.model or sam_model
+            if segmentation.primary_box:
+                segmentation_roi = segmentation.primary_box
+            method = "baseline_diff->sam-3.1" if not segmentation.fallback_used else (
+                "baseline_diff->sam-offline"
+            )
+            description = f"{description}; SAM: {segmentation.detail}"
+        except Exception as exc:  # noqa: BLE001 - segmentation is best-effort
+            self._log_vision_error(incident_id, "sam", exc)
+            description = f"{description}; SAM unavailable: {type(exc).__name__}"
 
         return VisionEvidence(
             operator_present=operator_present,
-            confidence=0.94 if operator_present else 0.88,
-            roi=roi,
-            description=(
-                "operator at the console"
-                if operator_present
-                else "empty seat while a privileged command ran"
-            ),
+            confidence=round(confidence, 3),
+            roi=list(segmentation_roi) if segmentation_roi else (list(roi) if roi else []),
+            description=description[:600],
             frame_path=str(frame_path) if frame_path.exists() else None,
             mask_path=str(mask_path) if mask_path.exists() else None,
-            model=self.settings.sam_model,
+            model=sam_model,
+            method=method,
+            motion_ratio=motion_ratio,
+            frame_source=captured.source,
+            presence_known=presence_known,
         )
 
     def _log_vision_error(self, incident_id: str, stage: str, exc: Exception) -> None:
@@ -405,6 +575,35 @@ class AppState:
     def _remember(self, incident: Incident) -> None:
         self.incidents[incident.id] = incident
         self.incident_order.append(incident.id)
+        self._persist(incident)
+
+    def _persist(self, incident: Incident) -> None:
+        if not self.settings.persist_incidents:
+            return
+        try:
+            path = self.settings.incidents_dir / f"{incident.id}.json"
+            path.write_text(
+                incident.model_dump_json(indent=2), encoding="utf-8"
+            )
+        except OSError as exc:
+            self._log_vision_error(incident.id, "persist", exc)
+
+    def _load_persisted(self, limit: int = 50) -> None:
+        directory = self.settings.incidents_dir
+        if not directory.is_dir():
+            return
+        files = sorted(
+            (path for path in directory.glob("*.json") if path.is_file()),
+            key=lambda path: path.stat().st_mtime,
+        )[-limit:]
+        for path in files:
+            try:
+                incident = Incident.model_validate_json(path.read_text(encoding="utf-8"))
+            except Exception as exc:  # noqa: BLE001 - skip corrupt files
+                self._log_vision_error(path.stem, "load", exc)
+                continue
+            self.incidents[incident.id] = incident
+            self.incident_order.append(incident.id)
 
     # -- approvals -----------------------------------------------------------
 
@@ -437,6 +636,7 @@ class AppState:
         success = bool(results) and all(result.success for result in results)
         incident.status = IncidentStatus.CONTAINED if success else IncidentStatus.OPEN
         incident.touch()
+        self._persist(incident)
 
         await self.publish_incident(incident)
         return incident
@@ -447,6 +647,43 @@ class AppState:
             raise HTTPException(status_code=404, detail="incident not found")
         incident.status = IncidentStatus.DISMISSED
         incident.touch()
+        self._persist(incident)
+        await self.publish_incident(incident)
+        return incident
+
+    # -- forensics / patch ---------------------------------------------------
+
+    async def run_forensics(self, incident_id: str) -> Incident:
+        incident = self.incidents.get(incident_id)
+        if incident is None:
+            raise HTTPException(status_code=404, detail="incident not found")
+
+        report = await self.forensics.analyze(
+            incident.id, incident.events, incident.vision
+        )
+        incident.forensics = report
+        incident.touch()
+        self._persist(incident)
+        await self.publish_incident(incident)
+        return incident
+
+    async def run_patch(self, incident_id: str) -> Incident:
+        incident = self.incidents.get(incident_id)
+        if incident is None:
+            raise HTTPException(status_code=404, detail="incident not found")
+
+        if incident.forensics is None:
+            report = await self.forensics.analyze(
+                incident.id, incident.events, incident.vision
+            )
+            incident.forensics = report
+
+        patch = await self.patcher.patch(incident, incident.forensics)
+        incident.patch = patch
+        if patch.verified:
+            incident.status = IncidentStatus.PATCHED
+        incident.touch()
+        self._persist(incident)
         await self.publish_incident(incident)
         return incident
 
@@ -454,10 +691,15 @@ class AppState:
 
     async def gateway_status(self) -> dict[str, Any]:
         try:
+            headers = (
+                {"x-internal-token": self.settings.internal_api_token}
+                if self.settings.internal_api_token
+                else None
+            )
             async with httpx.AsyncClient(
                 base_url=self.settings.target_base_url, timeout=3.0
             ) as client:
-                state = await client.get("/internal/state")
+                state = await client.get("/internal/state", headers=headers)
                 state.raise_for_status()
                 health = await client.get("/health")
                 body = state.json()
@@ -473,12 +715,6 @@ class AppState:
                 "rule": None,
                 "revision": 0,
             }
-
-
-def _blank_frame():  # pragma: no cover - trivial helper for mask generation
-    import numpy as np
-
-    return np.zeros((120, 160, 3), dtype=np.uint8)
 
 
 def create_app(
@@ -593,6 +829,16 @@ def create_app(
     @app.get("/api/gateway")
     async def gateway() -> dict[str, Any]:
         return await state.gateway_status()
+
+    @app.post("/api/incidents/{incident_id}/forensics")
+    async def forensics(incident_id: str) -> dict[str, Any]:
+        incident = await state.run_forensics(incident_id)
+        return incident.model_dump(mode="json")
+
+    @app.post("/api/incidents/{incident_id}/patch")
+    async def patch(incident_id: str) -> dict[str, Any]:
+        incident = await state.run_patch(incident_id)
+        return incident.model_dump(mode="json")
 
     @app.get("/api/scenarios")
     async def scenarios() -> dict[str, Any]:

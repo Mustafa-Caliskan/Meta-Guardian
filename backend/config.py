@@ -98,9 +98,20 @@ class Settings:
     request_timeout: float = 60.0
     temperature: float = 0.2
     max_tokens: int = 2048
+    reasoning_effort: str = "low"
 
     action_timeout: float = 10.0
     max_actions_per_minute: int = 30
+    kill_allowlist: str = ""
+
+    correlation_window_seconds: float = 30.0
+    correlation_cooldown_seconds: float = 10.0
+    operator_motion_threshold: float = 0.004
+    baseline_frame: str = ""
+    persist_incidents: bool = True
+
+    trust_forwarded_for: bool = False
+    internal_api_token: str = ""
 
     fixtures_dir: Path = field(default_factory=lambda: FIXTURES_DIR)
     runtime_dir: Path = field(default_factory=lambda: RUNTIME_DIR)
@@ -119,6 +130,17 @@ class Settings:
     def request_log_path(self) -> Path:
         return self.runtime_dir / "target_requests.jsonl"
 
+    @property
+    def incidents_dir(self) -> Path:
+        return self.runtime_dir / "incidents"
+
+    @property
+    def baseline_frame_path(self) -> Path:
+        if self.baseline_frame:
+            candidate = Path(self.baseline_frame)
+            return candidate if candidate.is_absolute() else PROJECT_ROOT / candidate
+        return SCENARIOS_DIR / "diff_pair" / "baseline.png"
+
     def ensure_dirs(self) -> None:
         for path in (
             DATA_DIR,
@@ -127,6 +149,7 @@ class Settings:
             HISTORY_LOGS_DIR,
             self.runtime_dir,
             self.quarantine_dir,
+            self.incidents_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 
@@ -160,8 +183,17 @@ def get_settings() -> Settings:
         request_timeout=_env_float("REQUEST_TIMEOUT", 60.0),
         temperature=_env_float("TEMPERATURE", 0.2),
         max_tokens=_env_int("MAX_TOKENS", 2048),
+        reasoning_effort=_env("REASONING_EFFORT", "low"),
         action_timeout=_env_float("ACTION_TIMEOUT", 10.0),
         max_actions_per_minute=_env_int("MAX_ACTIONS_PER_MINUTE", 30),
+        kill_allowlist=_env("KILL_ALLOWLIST", ""),
+        correlation_window_seconds=_env_float("CORRELATION_WINDOW_SECONDS", 30.0),
+        correlation_cooldown_seconds=_env_float("CORRELATION_COOLDOWN_SECONDS", 10.0),
+        operator_motion_threshold=_env_float("OPERATOR_MOTION_THRESHOLD", 0.004),
+        baseline_frame=_env("BASELINE_FRAME", ""),
+        persist_incidents=_env("PERSIST_INCIDENTS", "1") not in ("0", "false", "False"),
+        trust_forwarded_for=_env("TRUST_FORWARDED_FOR", "0") in ("1", "true", "True"),
+        internal_api_token=_env("INTERNAL_API_TOKEN", ""),
         fixtures_dir=Path(_env("FIXTURES_DIR", str(FIXTURES_DIR))),
         runtime_dir=Path(_env("RUNTIME_DIR", str(RUNTIME_DIR))),
         quarantine_dir=Path(_env("QUARANTINE_DIR", str(PROJECT_ROOT / "quarantine"))),
