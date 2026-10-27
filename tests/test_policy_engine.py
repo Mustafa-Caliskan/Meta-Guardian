@@ -148,6 +148,75 @@ def test_admin_command_without_operator_is_ghost_attack():
     }
 
 
+def test_ghost_claim_without_verified_presence_needs_approval():
+    from backend.models import VisionEvidence
+
+    unknown_presence = VisionEvidence(
+        operator_present=False,
+        confidence=0.2,
+        roi=[],
+        description="scene mismatch: presence unknown",
+        presence_known=False,
+        method="baseline_diff",
+    )
+    engine = PolicyEngine(ChangeTicketStore(tickets=[]))
+    outcome = engine.evaluate(
+        events=[admin_event()],
+        proposed=decision(
+            classification=Classification.GHOST_ATTACK,
+            confidence=0.93,
+            actions=default_actions(),
+        ),
+        vision=unknown_presence,
+        now=utc_now(),
+    )
+
+    assert outcome.classification is Classification.THREAT_CRITICAL
+    assert outcome.mode is PolicyMode.APPROVAL
+    assert outcome.approved_actions == []
+    assert len(outcome.pending_actions) == 3
+    assert "presence is unknown" in outcome.reason
+
+
+def test_ghost_claim_without_presence_and_low_confidence_monitors():
+    from backend.models import VisionEvidence
+
+    unknown_presence = VisionEvidence(
+        operator_present=False, confidence=0.1, presence_known=False
+    )
+    engine = PolicyEngine(ChangeTicketStore(tickets=[]))
+    outcome = engine.evaluate(
+        events=[admin_event()],
+        proposed=decision(
+            classification=Classification.GHOST_ATTACK,
+            confidence=0.3,
+            actions=default_actions(),
+        ),
+        vision=unknown_presence,
+        now=utc_now(),
+    )
+
+    assert outcome.mode is PolicyMode.MONITOR
+    assert outcome.approved_actions == []
+
+
+def test_verified_presence_ghost_still_auto_contains():
+    engine = PolicyEngine(ChangeTicketStore(tickets=[]))
+    outcome = engine.evaluate(
+        events=[admin_event()],
+        proposed=decision(
+            classification=Classification.GHOST_ATTACK,
+            confidence=0.93,
+            actions=default_actions(),
+        ),
+        vision=vision(False),
+        now=utc_now(),
+    )
+
+    assert outcome.classification is Classification.GHOST_ATTACK
+    assert outcome.mode is PolicyMode.AUTO
+
+
 def test_llm_cannot_whitelist_without_ticket():
     engine = PolicyEngine(ChangeTicketStore(tickets=[]))
     outcome = engine.evaluate(

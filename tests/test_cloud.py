@@ -372,3 +372,40 @@ def test_choose_markers_is_allowlisted():
     assert all(marker in {"aircraft=all", "limit=99999", "export=all", "dump=true", "../", "..\\", "union select", "' or '1'='1", "; drop", "<script", "javascript:"} for marker in markers)
     # the model cannot inject an arbitrary marker
     assert "rm -rf" not in choose_markers(report)
+
+
+def test_exact_line_for_resolves_and_rejects_ambiguous_matches():
+    from scripts.forensics_full_archive import exact_line_for
+
+    lines = [
+        "2026-10-01 src=10.0.0.5 path=/health status=200",
+        "2026-10-04 src=203.0.113.66 path=/api/v1/ops/scan status=200",
+        "2026-10-04 src=203.0.113.66 path=/api/v1/ops/scan status=200",
+    ]
+    assert exact_line_for(lines, "src=10.0.0.5 path=/health") == 1
+    # the excerpt appears twice, so it is ambiguous and must not be auto-corrected
+    assert exact_line_for(lines, "path=/api/v1/ops/scan") is None
+    assert exact_line_for(lines, "does not exist") is None
+
+
+def test_verify_payload_corrects_miscounted_lines(tmp_path):
+    from scripts.forensics_full_archive import verify_payload
+
+    lines = [
+        "2026-10-01 src=10.0.0.5 path=/health status=200",
+        "2026-10-04 src=203.0.113.66 path=/api/v1/ops/scan status=200",
+    ]
+    payload = {
+        "citations": [
+            {
+                "log_file": "data/history_logs/siem_30d.log",
+                "line": 999,
+                "excerpt": "src=203.0.113.66 path=/api/v1/ops/scan",
+            }
+        ]
+    }
+    result = verify_payload(payload, lines)
+
+    assert len(result["citations"]) == 1
+    assert result["citations"][0].line == 2
+    assert result["corrected"] == [{"claimed_line": 999, "resolved_line": 2}]

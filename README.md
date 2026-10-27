@@ -274,6 +274,28 @@ Known Windows fix included: OpenCV's `imwrite`/`imread` cannot handle non-ASCII
 paths (e.g. a Turkish user folder), so frames are encoded in memory and written
 with `Path.write_bytes`.
 
+## 1M-context evidence
+
+The per-incident forensics path is retrieval-first: prioritized excerpts plus
+line-by-line citation verification. That is the *defensible* design, but it does
+not by itself prove the 1M-context claim.
+
+A one-off full-archive run does. `scripts/forensics_full_archive.py` sent
+**1,026,768 input tokens in a single request** to Baseten
+`meta-models/muse-spark-open-1026` (hard limit 1,048,544) and completed in 13.5 s:
+
+- All 7 citations verified against real archive lines.
+- `earliest_discovery` matched the archive manifest exactly (`2026-10-23T16:43:00Z`).
+- The model quoted text verbatim but miscounted line numbers; each excerpt was
+  resolved by a unique verbatim match and the correction is recorded.
+- The full file is ~1.068M tokens, so the oldest ~4% of benign traffic was
+  trimmed. All attacker activity was inside the slice.
+
+Details: [`docs/FULL_ARCHIVE_RUN.md`](docs/FULL_ARCHIVE_RUN.md).
+Replay record: `data/fixtures/forensics_full_archive.json`.
+
+State it on camera as a validation run, not as the per-incident path.
+
 ## Documentation
 
 - [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — adversaries, trust boundaries,
@@ -302,6 +324,14 @@ with `Path.write_bytes`.
   not a network measurement.
 - Cloud output is verified, not trusted: citations must match real lines and the
   patch must prove a 403, otherwise the system falls back or rolls back.
+- Removable-media detection uses filesystem and mount options (`removable`,
+  `vfat`, `exfat`). It deliberately ignores fixed, network and image mounts, which
+  means a USB disk formatted NTFS without the `removable` flag can be missed.
+- Operator presence requires a calibrated baseline. If the camera moves, the
+  system reports *presence unknown* and never claims a Ghost Attack; a model that
+  still claims one is downgraded to human approval by the policy gate.
+- The OODA pipeline is serialized by one lock, so a slow live model call queues
+  the next correlated bundle.
 
 ## License
 

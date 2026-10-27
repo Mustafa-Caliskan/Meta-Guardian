@@ -88,8 +88,24 @@ class Partition:
 
     @property
     def removable_hint(self) -> bool:
-        lowered = f"{self.fstype} {self.opts} {self.mountpoint}".lower()
-        return any(token in lowered for token in ("removable", "usb", "media", "vfat", "exfat"))
+        # Deliberately excludes the mountpoint: a folder named "usb" or a test
+        # directory must not make a fixed volume look like removable media.
+        lowered = f"{self.fstype} {self.opts}".lower()
+        return any(token in lowered for token in ("removable", "vfat", "exfat"))
+
+    @property
+    def is_removable(self) -> bool:
+        """Best-effort removable-media check.
+
+        Mounting a network share, an ISO/VHD image or a phone over MTP also
+        produces a new partition. Treating those as a physical USB insertion
+        would fabricate the exact physical event this project claims to detect.
+        We therefore only accept explicit removable hints or removable-media
+        filesystems; everything else is ignored.
+        """
+        if self.removable_hint:
+            return True
+        return str(self.fstype).lower() in {"vfat", "exfat", "fat", "fat32", "msdos"}
 
 
 def default_partition_provider() -> Iterable[Partition]:
@@ -196,9 +212,14 @@ class USBWatcher:
         for mountpoint, part in current.items():
             if mountpoint in self._known:
                 continue
+            if not part.is_removable:
+                # Ignore fixed/network/image mounts: they are not physical media.
+                continue
             events.append(self._on_inserted(part))
         for mountpoint, part in self._known.items():
             if mountpoint not in current:
+                if not part.is_removable:
+                    continue
                 events.append(self._on_removed(part))
 
         self._known = current
@@ -221,6 +242,7 @@ class USBWatcher:
                 "fstype": part.fstype,
                 "opts": part.opts,
                 "removable_hint": part.removable_hint,
+                "is_removable": part.is_removable,
                 "findings": findings,
                 "autorun_executed": False,
             },

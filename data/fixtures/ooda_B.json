@@ -1,0 +1,35 @@
+{
+  "task": "ooda:B",
+  "model": "meta-models/muse-spark-open-1026",
+  "latency_ms": 2238.0,
+  "request_messages": [
+    {
+      "role": "system",
+      "content": "You are Meta-Guardian, an autonomous blue-team SOC agent.\nAnalyse the evidence bundle and reply with STRICT JSON only, no markdown.\n\nSchema:\n{\n  \"classification\": \"THREAT_CRITICAL\" | \"GHOST_ATTACK\" | \"BENIGN_AUTHORIZED\" | \"BENIGN_UNKNOWN\",\n  \"severity\": \"info\" | \"low\" | \"medium\" | \"high\" | \"critical\",\n  \"confidence\": 0.0-1.0,\n  \"reasoning\": \"short explanation grounded in the evidence\",\n  \"evidence_summary\": \"one sentence\",\n  \"actions\": [\n    {\"action\": \"quarantine_usb_file\" | \"block_ip_on_gateway\" | \"revoke_session_token\" | \"kill_process\",\n     \"target\": \"file name, IP, session token or PID\",\n     \"reason\": \"why\"}\n  ]\n}\n\nRules:\n- Only propose an action you can justify from the evidence.\n- If presence_known is false, you MUST NOT classify GHOST_ATTACK. Presence is\n  unknown, not absent. Use THREAT_CRITICAL (or BENIGN_UNKNOWN) with confidence\n  below 0.85 so a human approves any containment.\n- Only if presence_known is true AND operator_present is false AND a privileged\n  command ran may you classify GHOST_ATTACK.\n- If change_ticket_valid is true, classify BENIGN_AUTHORIZED and propose no actions.\n- Never invent IPs, session tokens or file names; use the ones in the evidence."
+    },
+    {
+      "role": "user",
+      "content": "Evidence bundle:\n{\n  \"operator_present\": false,\n  \"operator_confidence\": 0.9,\n  \"vision_summary\": \"empty seat, no motion\",\n  \"change_ticket_valid\": false,\n  \"change_ticket\": null,\n  \"presence_known\": true,\n  \"event_count\": 1,\n  \"events\": [\n    {\n      \"type\": \"admin_command\",\n      \"source\": \"network\",\n      \"severity\": \"high\",\n      \"summary\": \"POST /api/v1/admin/command from 203.0.113.66 -> HTTP 200\",\n      \"timestamp\": \"2026-10-27T09:27:07.693861+00:00\",\n      \"ip\": \"203.0.113.66\",\n      \"session\": \"session-7f3a9c\",\n      \"method\": \"POST\",\n      \"path\": \"/api/v1/admin/command\",\n      \"status\": 200,\n      \"findings\": null\n    }\n  ]\n}"
+    }
+  ],
+  "response": "{\"classification\":\"GHOST_ATTACK\",\"severity\":\"high\",\"confidence\":0.9,\"reasoning\":\"presence_known true with operator_present false (vision empty seat) while privileged admin_command POST /api/v1/admin/command succeeded from network source, indicating operator-absent execution\",\"evidence_summary\":\"single high-severity admin_command from 203.0.113.66 with HTTP 200 while operator absent and no valid change ticket\",\"actions\":[{\"action\":\"block_ip_on_gateway\",\"target\":\"203.0.113.66\",\"reason\":\"source IP of operator-absent privileged admin command\"},{\"action\":\"revoke_session_token\",\"target\":\"session-7f3a9c\",\"reason\":\"session used for operator-absent privileged execution\"}]}",
+  "response_json": {
+    "classification": "GHOST_ATTACK",
+    "severity": "high",
+    "confidence": 0.9,
+    "reasoning": "presence_known true with operator_present false (vision empty seat) while privileged admin_command POST /api/v1/admin/command succeeded from network source, indicating operator-absent execution",
+    "evidence_summary": "single high-severity admin_command from 203.0.113.66 with HTTP 200 while operator absent and no valid change ticket",
+    "actions": [
+      {
+        "action": "block_ip_on_gateway",
+        "target": "203.0.113.66",
+        "reason": "source IP of operator-absent privileged admin command"
+      },
+      {
+        "action": "revoke_session_token",
+        "target": "session-7f3a9c",
+        "reason": "session used for operator-absent privileged execution"
+      }
+    ]
+  }
+}

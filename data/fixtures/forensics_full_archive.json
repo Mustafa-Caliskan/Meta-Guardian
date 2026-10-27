@@ -1,0 +1,135 @@
+{
+  "task": "forensics_full_archive",
+  "provider": "baseten",
+  "model": "meta-models/muse-spark-open-1026",
+  "characters_sent": 2399862,
+  "lines_sent": 12274,
+  "first_line_number": 500,
+  "complete_file": false,
+  "approx_input_tokens": 1025582,
+  "input_tokens_reported": 1026768,
+  "output_tokens_reported": 3197,
+  "latency_ms": 13511.7,
+  "wall_ms": 13511.74,
+  "error": "",
+  "citations_total": 7,
+  "citations_verified": 7,
+  "earliest_discovery": "2026-10-23T16:43:00Z",
+  "manifest_earliest": "2026-10-23T16:43:00Z",
+  "recon_match": true,
+  "recorded_at": "2026-10-27T09:37:48.961794+00:00",
+  "request_messages_summary": {
+    "system_chars": 754,
+    "archive_chars": 2399862
+  },
+  "response": "{\n  \"earliest_discovery\": \"2026-10-23T16:43:00Z\",\n  \"attacker_ip\": \"203.0.113.66\",\n  \"attack_chain\": [\n    {\n      \"timestamp\": \"2026-10-23T16:43:00Z\",\n      \"endpoint\": \"/api/v1/ops/scan\",\n      \"description\": \"Initial reconnaissance - successful scan (200) from RU IP using hijacked session-7f3a9c\"\n    },\n    {\n      \"timestamp\": \"2026-10-23T16:43:06Z\",\n      \"endpoint\": \"/api/v1/ops/flights\",\n      \"description\": \"Enumeration of flights endpoint\"\n    },\n    {\n      \"timestamp\": \"2026-10-23T16:43:11Z\",\n      \"endpoint\": \"/api/v1/ops/data?aircraft=PC-1180&limit=50\",\n      \"description\": \"Probing data endpoint with elevated limit 50\"\n    },\n    {\n      \"timestamp\": \"2026-10-23T16:43:19Z\",\n      \"endpoint\": \"/api/v1/admin/command\",\n      \"description\": \"Failed admin command attempt (401) - privilege escalation attempt\"\n    },\n    {\n      \"timestamp\": \"2026-10-23T16:43:27Z\",\n      \"endpoint\": \"/api/v1/ops/data?aircraft=ALL&limit=5\",\n      \"description\": \"Discovery of wildcard ALL aircraft parameter\"\n    },\n    {\n      \"timestamp\": \"2026-10-23T16:43:55Z\",\n      \"endpoint\": \"/api/v1/ops/scan\",\n      \"description\": \"Re-validation of scan access\"\n    },\n    {\n      \"timestamp\": \"2026-10-26T16:58:00Z\",\n      \"endpoint\": \"/api/v1/ops/data?aircraft=ALL&limit=99999\",\n      \"description\": \"Exfiltration - bulk download of all aircraft data with limit 99999, 1843200 bytes\"\n    }\n  ],\n  \"citations\": [\n    {\n      \"log_file\": \"data/history_logs/siem_30d.log\",\n      \"line\": 11520,\n      \"excerpt\": \"2026-10-23T16:43:00Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/scan status=200 bytes=320 latency_ms=70 session=session-7f3a9c geo=RU ua=\\\"python-requests/2.32.3\\\"\"\n    },\n    {\n      \"log_file\": \"data/history_logs/siem_30d.log\",\n      \"line\": 11521,\n      \"excerpt\": \"2026-10-23T16:43:06Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/flights status=200 bytes=512 latency_ms=59 session=session-7f3a9c geo=RU ua=\\\"python-requests/2.32.3\\\"\"\n    },\n    {\n      \"log_file\": \"data/history_logs/siem_30d.log\",\n      \"line\": 11522,\n      \"excerpt\": \"2026-10-23T16:43:11Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/data?aircraft=PC-1180&limit=50 status=200 bytes=10240 latency_ms=35 session=session-7f3a9c geo=RU ua=\\\"python-requests/2.32.3\\\"\"\n    },\n    {\n      \"log_file\": \"data/history_logs/siem_30d.log\",\n      \"line\": 11523,\n      \"excerpt\": \"2026-10-23T16:43:19Z src=203.0.113.66 dst=10.0.0.12 method=POST path=/api/v1/admin/command status=401 bytes=96 latency_ms=29 session=- geo=RU ua=\\\"python-requests/2.32.3\\\"\"\n    },\n    {\n      \"log_file\": \"data/history_logs/siem_30d.log\",\n      \"line\": 11524,\n      \"excerpt\": \"2026-10-23T16:43:27Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/data?aircraft=ALL&limit=5 status=200 bytes=1024 latency_ms=81 session=session-7f3a9c geo=RU ua=\\\"python-requests/2.32.3\\\"\"\n    },\n    {\n      \"log_file\": \"data/history_logs/siem_30d.log\",\n      \"line\": 11527,\n      \"excerpt\": \"2026-10-23T16:43:55Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/scan status=200 bytes=320 latency_ms=27 session=session-7f3a9c geo=RU ua=\\\"python-requests/2.32.3\\\"\"\n    },\n    {\n      \"log_file\": \"data/history_logs/siem_30d.log\",\n      \"line\": 12770,\n      \"excerpt\": \"2026-10-26T16:58:00Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/data?aircraft=ALL&limit=99999 status=200 bytes=1843200 latency_ms=63 session=session-7f3a9c geo=RU ua=\\\"python-requests/2.32.3\\\"\"\n    }\n  ],\n  \"summary\": \"Attacker 203.0.113.66 (RU) hijacked session-7f3a9c. Earliest reconnaissance at 2026-10-23T16:43:00Z with successful /ops/scan, followed by flights enumeration, probing limit=50, failed admin command, and discovery of wildcard aircraft=ALL. After 3 days of dormancy, exfiltrated all records via aircraft=ALL&limit=99999 (1,843,200 bytes) on 2026-10-26T16:58:00Z.\"\n}",
+  "response_json": {
+    "earliest_discovery": "2026-10-23T16:43:00Z",
+    "attacker_ip": "203.0.113.66",
+    "attack_chain": [
+      {
+        "timestamp": "2026-10-23T16:43:00Z",
+        "endpoint": "/api/v1/ops/scan",
+        "description": "Initial reconnaissance - successful scan (200) from RU IP using hijacked session-7f3a9c"
+      },
+      {
+        "timestamp": "2026-10-23T16:43:06Z",
+        "endpoint": "/api/v1/ops/flights",
+        "description": "Enumeration of flights endpoint"
+      },
+      {
+        "timestamp": "2026-10-23T16:43:11Z",
+        "endpoint": "/api/v1/ops/data?aircraft=PC-1180&limit=50",
+        "description": "Probing data endpoint with elevated limit 50"
+      },
+      {
+        "timestamp": "2026-10-23T16:43:19Z",
+        "endpoint": "/api/v1/admin/command",
+        "description": "Failed admin command attempt (401) - privilege escalation attempt"
+      },
+      {
+        "timestamp": "2026-10-23T16:43:27Z",
+        "endpoint": "/api/v1/ops/data?aircraft=ALL&limit=5",
+        "description": "Discovery of wildcard ALL aircraft parameter"
+      },
+      {
+        "timestamp": "2026-10-23T16:43:55Z",
+        "endpoint": "/api/v1/ops/scan",
+        "description": "Re-validation of scan access"
+      },
+      {
+        "timestamp": "2026-10-26T16:58:00Z",
+        "endpoint": "/api/v1/ops/data?aircraft=ALL&limit=99999",
+        "description": "Exfiltration - bulk download of all aircraft data with limit 99999, 1843200 bytes"
+      }
+    ],
+    "citations": [
+      {
+        "log_file": "data/history_logs/siem_30d.log",
+        "line": 11520,
+        "excerpt": "2026-10-23T16:43:00Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/scan status=200 bytes=320 latency_ms=70 session=session-7f3a9c geo=RU ua=\"python-requests/2.32.3\""
+      },
+      {
+        "log_file": "data/history_logs/siem_30d.log",
+        "line": 11521,
+        "excerpt": "2026-10-23T16:43:06Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/flights status=200 bytes=512 latency_ms=59 session=session-7f3a9c geo=RU ua=\"python-requests/2.32.3\""
+      },
+      {
+        "log_file": "data/history_logs/siem_30d.log",
+        "line": 11522,
+        "excerpt": "2026-10-23T16:43:11Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/data?aircraft=PC-1180&limit=50 status=200 bytes=10240 latency_ms=35 session=session-7f3a9c geo=RU ua=\"python-requests/2.32.3\""
+      },
+      {
+        "log_file": "data/history_logs/siem_30d.log",
+        "line": 11523,
+        "excerpt": "2026-10-23T16:43:19Z src=203.0.113.66 dst=10.0.0.12 method=POST path=/api/v1/admin/command status=401 bytes=96 latency_ms=29 session=- geo=RU ua=\"python-requests/2.32.3\""
+      },
+      {
+        "log_file": "data/history_logs/siem_30d.log",
+        "line": 11524,
+        "excerpt": "2026-10-23T16:43:27Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/data?aircraft=ALL&limit=5 status=200 bytes=1024 latency_ms=81 session=session-7f3a9c geo=RU ua=\"python-requests/2.32.3\""
+      },
+      {
+        "log_file": "data/history_logs/siem_30d.log",
+        "line": 11527,
+        "excerpt": "2026-10-23T16:43:55Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/scan status=200 bytes=320 latency_ms=27 session=session-7f3a9c geo=RU ua=\"python-requests/2.32.3\""
+      },
+      {
+        "log_file": "data/history_logs/siem_30d.log",
+        "line": 12770,
+        "excerpt": "2026-10-26T16:58:00Z src=203.0.113.66 dst=10.0.0.12 method=GET path=/api/v1/ops/data?aircraft=ALL&limit=99999 status=200 bytes=1843200 latency_ms=63 session=session-7f3a9c geo=RU ua=\"python-requests/2.32.3\""
+      }
+    ],
+    "summary": "Attacker 203.0.113.66 (RU) hijacked session-7f3a9c. Earliest reconnaissance at 2026-10-23T16:43:00Z with successful /ops/scan, followed by flights enumeration, probing limit=50, failed admin command, and discovery of wildcard aircraft=ALL. After 3 days of dormancy, exfiltrated all records via aircraft=ALL&limit=99999 (1,843,200 bytes) on 2026-10-26T16:58:00Z."
+  },
+  "citations_corrected": [
+    {
+      "claimed_line": 11520,
+      "resolved_line": 11512
+    },
+    {
+      "claimed_line": 11521,
+      "resolved_line": 11513
+    },
+    {
+      "claimed_line": 11522,
+      "resolved_line": 11514
+    },
+    {
+      "claimed_line": 11523,
+      "resolved_line": 11515
+    },
+    {
+      "claimed_line": 11524,
+      "resolved_line": 11517
+    },
+    {
+      "claimed_line": 11527,
+      "resolved_line": 11519
+    },
+    {
+      "claimed_line": 12770,
+      "resolved_line": 12773
+    }
+  ]
+}

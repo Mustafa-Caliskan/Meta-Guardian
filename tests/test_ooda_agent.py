@@ -252,3 +252,88 @@ async def test_hallucinated_ip_and_session_are_replaced_with_evidence():
     targets = {name: args for name, args in mcp.calls}
     assert targets["block_ip_on_gateway"] == {"ip": "203.0.113.66"}
     assert targets["revoke_session_token"] == {"session": "session-real"}
+
+
+async def test_llm_ghost_claim_with_unknown_presence_requires_approval():
+    from backend.models import VisionEvidence
+
+    unknown = VisionEvidence(
+        operator_present=False,
+        confidence=0.2,
+        description="scene mismatch: presence unknown",
+        presence_known=False,
+    )
+    payload = {
+        "classification": "GHOST_ATTACK",
+        "severity": "critical",
+        "confidence": 0.93,
+        "reasoning": "no operator",
+        "actions": [
+            {"action": "revoke_session_token", "target": "session-7f3a9c"},
+        ],
+    }
+    mcp = FakeMCP()
+    store = ChangeTicketStore(tickets=[])
+    agent = OODAAgent(
+        StubLLM(payload), policy=PolicyEngine(store), mcp=mcp, change_tickets=store
+    )
+
+    incident = await agent.run([admin_event()], unknown, now=utc_now())
+
+    assert incident.policy.mode is PolicyMode.APPROVAL
+    assert incident.decision.classification is Classification.THREAT_CRITICAL
+    assert incident.status is IncidentStatus.OPEN
+    assert mcp.calls == []
+
+
+async def test_scenario_key_is_used_for_the_llm_task():
+    class TaskAwareLLM(StubLLM):
+        def __init__(self):
+            super().__init__({"classification": "THREAT_CRITICAL", "confidence": 0.93})
+            self.tasks = []
+
+        async def complete(self, messages, *, task="", **kwargs):
+            self.tasks.append(task)
+            return await super().complete(messages, task=task, **kwargs)
+
+    llm = TaskAwareLLM()
+    store = ChangeTicketStore(tickets=[])
+    agent = OODAAgent(llm, policy=PolicyEngine(store), change_tickets=store)
+
+    await agent.run([usb_event()], vision(True), now=utc_now(), scenario="A")
+    await agent.run([admin_event()], vision(False), now=utc_now(), scenario="B")
+
+    assert llm.tasks == ["ooda:A", "ooda:B"]
+
+
+def test_replay_fixtures_distinguish_scenarios():
+    from backend.config import FIXTURES_DIR
+    from backend.llm.replay import ReplayLLM
+
+    llm = ReplayLLM(FIXTURES_DIR)
+    import asyncio
+
+    async def classify(task):
+        payload, _ = await llm.complete_json([{"role": "user", "content": "x"}], task=task)
+        return payload.get("classification")
+
+    assert asyncio.run(classify("ooda:A")) == "THREAT_CRITICAL"
+    assert asyncio.run(classify("ooda:B")) == "GHOST_ATTACK"
+    assert asyncio.run(classify("ooda:C")) == "BENIGN_AUTHORIZED"
+
+
+def test_replay_falls_back_to_generic_fixture_for_unknown_scenario():
+    from backend.config import FIXTURES_DIR
+    from backend.llm.replay import ReplayLLM
+
+    llm = ReplayLLM(FIXTURES_DIR)
+    import asyncio
+
+    payload, _ = asyncio.run(
+        llm.complete_json([{"role": "user", "content": "x"}], task="ooda:D")
+    )
+    assert payload.get("classification") in {
+        "THREAT_CRITICAL",
+        "GHOST_ATTACK",
+        "BENIGN_AUTHORIZED",
+    }

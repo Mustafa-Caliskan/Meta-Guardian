@@ -78,6 +78,20 @@ SCENARIO_EVENTS = [
     ),
 ]
 
+ADMIN_EVENT = SecurityEvent(
+    source=EventSource.NETWORK,
+    type=EventType.ADMIN_COMMAND,
+    severity=Severity.HIGH,
+    summary="POST /api/v1/admin/command from 203.0.113.66 -> HTTP 200",
+    payload={
+        "ip": "203.0.113.66",
+        "session": "session-7f3a9c",
+        "method": "POST",
+        "path": "/api/v1/admin/command",
+        "status": 200,
+    },
+)
+
 SCENARIO_VISION = VisionEvidence(
     operator_present=True,
     confidence=0.94,
@@ -86,6 +100,39 @@ SCENARIO_VISION = VisionEvidence(
     method="baseline_diff->sam-3.1",
     motion_ratio=0.021,
 )
+
+
+def evidence_for(scenario: str) -> dict:
+    operator_present = scenario != "B"
+    ticket_valid = scenario == "C"
+    events = [ADMIN_EVENT] if scenario == "B" else SCENARIO_EVENTS
+    return {
+        "operator_present": operator_present,
+        "operator_confidence": 0.94 if operator_present else 0.9,
+        "vision_summary": (
+            "operator at the console" if operator_present else "empty seat, no motion"
+        ),
+        "change_ticket_valid": ticket_valid,
+        "change_ticket": (
+            {"ticket_id": "CHG-2026-77", "operator": "mustafa", "reason": "approved maintenance"}
+            if ticket_valid
+            else None
+        ),
+        "presence_known": True,
+        "event_count": len(events),
+        "events": [
+            {
+                "type": event.type.value,
+                "source": event.source.value,
+                "severity": event.severity.value,
+                "summary": event.summary,
+                "timestamp": event.timestamp.isoformat(),
+                **{k: v for k, v in (event.payload or {}).items() if k != "findings"},
+                "findings": (event.payload or {}).get("findings"),
+            }
+            for event in events
+        ],
+    }
 
 
 def build_live_llm(provider: str, model: str | None, max_tokens: int):
@@ -127,37 +174,34 @@ async def record(provider: str, model: str | None, max_tokens: int, only: str | 
     failures = 0
 
     if only in (None, "ooda"):
-        evidence = {
-            "operator_present": True,
-            "operator_confidence": 0.94,
-            "vision_summary": SCENARIO_VISION.description,
-            "change_ticket_valid": False,
-            "change_ticket": None,
-            "presence_known": True,
-            "event_count": len(SCENARIO_EVENTS),
-            "events": [
+        for scenario in ("A", "B", "C"):
+            evidence = evidence_for(scenario)
+            messages = [
+                {"role": "system", "content": OODA_SYSTEM_PROMPT},
                 {
-                    "type": event.type.value,
-                    "source": event.source.value,
-                    "severity": event.severity.value,
-                    "summary": event.summary,
-                    "timestamp": event.timestamp.isoformat(),
-                    **{k: v for k, v in (event.payload or {}).items() if k != "findings"},
-                    "findings": (event.payload or {}).get("findings"),
-                }
-                for event in SCENARIO_EVENTS
-            ],
-        }
-        messages = [
-            {"role": "system", "content": OODA_SYSTEM_PROMPT},
-            {"role": "user", "content": "Evidence bundle:\n" + json.dumps(evidence, indent=2)},
-        ]
-        try:
-            payload, response = await recorder.complete_json(messages, task="ooda")
-            print(f"[ooda] {response.model} in {response.latency_ms:.0f} ms -> {payload.get('classification')}")
-        except Exception as exc:  # noqa: BLE001
-            failures += 1
-            print(f"[ooda] FAILED: {type(exc).__name__}: {exc}")
+                    "role": "user",
+                    "content": "Evidence bundle:\n" + json.dumps(evidence, indent=2),
+                },
+            ]
+            try:
+                payload, response = await recorder.complete_json(
+                    messages, task=f"ooda:{scenario}"
+                )
+                print(
+                    f"[ooda:{scenario}] {response.model} in {response.latency_ms:.0f} ms "
+                    f"-> {payload.get('classification')} ({payload.get('confidence')})"
+                )
+            except Exception as exc:  # noqa: BLE001
+                failures += 1
+                print(f"[ooda:{scenario}] FAILED: {type(exc).__name__}: {exc}")
+
+    if only is None and not (FIXTURES_DIR / "ooda.json").exists():
+        # Keep a generic fixture as a safety net for unknown scenarios.
+        import shutil
+
+        source = FIXTURES_DIR / "ooda_A.json"
+        if source.exists():
+            shutil.copyfile(source, FIXTURES_DIR / "ooda.json")
 
     if only in (None, "forensics"):
         engine = ForensicsEngine(recorder)

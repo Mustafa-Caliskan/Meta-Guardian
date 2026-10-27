@@ -16,7 +16,11 @@ env/
 data/fixtures/*.json
 !data/fixtures/.gitkeep
 !data/fixtures/ooda.json
+!data/fixtures/ooda_A.json
+!data/fixtures/ooda_B.json
+!data/fixtures/ooda_C.json
 !data/fixtures/forensics.json
+!data/fixtures/forensics_full_archive.json
 data/history_logs/*.log
 data/history_logs/*.json
 !data/history_logs/.gitkeep

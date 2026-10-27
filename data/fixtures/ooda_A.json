@@ -1,0 +1,40 @@
+{
+  "task": "ooda:A",
+  "model": "meta-models/muse-spark-open-1026",
+  "latency_ms": 3512.05,
+  "request_messages": [
+    {
+      "role": "system",
+      "content": "You are Meta-Guardian, an autonomous blue-team SOC agent.\nAnalyse the evidence bundle and reply with STRICT JSON only, no markdown.\n\nSchema:\n{\n  \"classification\": \"THREAT_CRITICAL\" | \"GHOST_ATTACK\" | \"BENIGN_AUTHORIZED\" | \"BENIGN_UNKNOWN\",\n  \"severity\": \"info\" | \"low\" | \"medium\" | \"high\" | \"critical\",\n  \"confidence\": 0.0-1.0,\n  \"reasoning\": \"short explanation grounded in the evidence\",\n  \"evidence_summary\": \"one sentence\",\n  \"actions\": [\n    {\"action\": \"quarantine_usb_file\" | \"block_ip_on_gateway\" | \"revoke_session_token\" | \"kill_process\",\n     \"target\": \"file name, IP, session token or PID\",\n     \"reason\": \"why\"}\n  ]\n}\n\nRules:\n- Only propose an action you can justify from the evidence.\n- If presence_known is false, you MUST NOT classify GHOST_ATTACK. Presence is\n  unknown, not absent. Use THREAT_CRITICAL (or BENIGN_UNKNOWN) with confidence\n  below 0.85 so a human approves any containment.\n- Only if presence_known is true AND operator_present is false AND a privileged\n  command ran may you classify GHOST_ATTACK.\n- If change_ticket_valid is true, classify BENIGN_AUTHORIZED and propose no actions.\n- Never invent IPs, session tokens or file names; use the ones in the evidence."
+    },
+    {
+      "role": "user",
+      "content": "Evidence bundle:\n{\n  \"operator_present\": true,\n  \"operator_confidence\": 0.94,\n  \"vision_summary\": \"operator at the console\",\n  \"change_ticket_valid\": false,\n  \"change_ticket\": null,\n  \"presence_known\": true,\n  \"event_count\": 2,\n  \"events\": [\n    {\n      \"type\": \"usb_inserted\",\n      \"source\": \"usb\",\n      \"severity\": \"high\",\n      \"summary\": \"Removable media mounted with 1 suspicious file(s)\",\n      \"timestamp\": \"2026-10-27T09:27:07.693861+00:00\",\n      \"mountpoint\": \"usb\",\n      \"autorun_executed\": false,\n      \"findings\": [\n        {\n          \"name\": \"payload.ps1\",\n          \"extension\": \".ps1\",\n          \"size\": 96,\n          \"sha256\": \"a1b2c3d4e5f60718\"\n        }\n      ]\n    },\n    {\n      \"type\": \"suspicious_api_request\",\n      \"source\": \"network\",\n      \"severity\": \"critical\",\n      \"summary\": \"GET /api/v1/ops/data?aircraft=ALL from 203.0.113.66 -> HTTP 200\",\n      \"timestamp\": \"2026-10-27T09:27:07.693861+00:00\",\n      \"ip\": \"203.0.113.66\",\n      \"session\": \"session-7f3a9c\",\n      \"method\": \"GET\",\n      \"path\": \"/api/v1/ops/data\",\n      \"query\": \"aircraft=ALL&limit=99999\",\n      \"status\": 200,\n      \"findings\": null\n    }\n  ]\n}"
+    }
+  ],
+  "response": "{\"classification\":\"THREAT_CRITICAL\",\"severity\":\"critical\",\"confidence\":0.93,\"reasoning\":\"Operator is present (0.94 confidence) but no valid change ticket; simultaneous high-severity USB payload (payload.ps1) and critical successful bulk exfiltration GET /api/v1/ops/data?aircraft=ALL from external IP 203.0.113.66 indicates active compromise requiring containment despite authorized presence.\",\"evidence_summary\":\"USB with payload.ps1 mounted and external IP 203.0.113.66 successfully exfiltrated ALL aircraft data via API without authorization.\",\"actions\":[{\"action\":\"quarantine_usb_file\",\"target\":\"payload.ps1\",\"reason\":\"Suspicious PowerShell file on unauthorized removable media\"},{\"action\":\"block_ip_on_gateway\",\"target\":\"203.0.113.66\",\"reason\":\"External IP performed successful bulk data exfiltration of ALL aircraft records\"},{\"action\":\"revoke_session_token\",\"target\":\"session-7f3a9c\",\"reason\":\"Session used for unauthorized bulk API data access\"}]}",
+  "response_json": {
+    "classification": "THREAT_CRITICAL",
+    "severity": "critical",
+    "confidence": 0.93,
+    "reasoning": "Operator is present (0.94 confidence) but no valid change ticket; simultaneous high-severity USB payload (payload.ps1) and critical successful bulk exfiltration GET /api/v1/ops/data?aircraft=ALL from external IP 203.0.113.66 indicates active compromise requiring containment despite authorized presence.",
+    "evidence_summary": "USB with payload.ps1 mounted and external IP 203.0.113.66 successfully exfiltrated ALL aircraft data via API without authorization.",
+    "actions": [
+      {
+        "action": "quarantine_usb_file",
+        "target": "payload.ps1",
+        "reason": "Suspicious PowerShell file on unauthorized removable media"
+      },
+      {
+        "action": "block_ip_on_gateway",
+        "target": "203.0.113.66",
+        "reason": "External IP performed successful bulk data exfiltration of ALL aircraft records"
+      },
+      {
+        "action": "revoke_session_token",
+        "target": "session-7f3a9c",
+        "reason": "Session used for unauthorized bulk API data access"
+      }
+    ]
+  }
+}

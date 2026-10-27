@@ -127,6 +127,9 @@ benchmark produced it.
 | Hallucinated log citations | Line + excerpt verification; deterministic manifest fallback | `backend/cloud/forensics.py` |
 | Unsafe auto-patch | Allowlisted deterministic template, replay proof, automatic rollback | `backend/cloud/patcher.py` |
 | Lost SOC history on restart | Incidents persisted as JSON | `backend/main.py` |
+| Model claims GHOST_ATTACK without verified presence | Prompt rule + deterministic downgrade to `THREAT_CRITICAL` with human approval | `backend/edge/ooda_agent.py`, `backend/edge/policy_engine.py` |
+| Replay returns the scenario-A verdict for B and C | Scenario-scoped fixture keys (`ooda:A/B/C`) with generic fallback | `backend/edge/ooda_agent.py`, `backend/llm/replay.py` |
+| Network/image mount treated as a USB insertion | Removable-only filter on filesystem and mount options | `backend/edge/usb_net_watcher.py` |
 
 ## 6. What the demo must not claim
 

@@ -201,6 +201,15 @@ class PolicyEngine:
             return self._ghost(proposed, events, operator_present, moment)
 
         classification = proposed.classification
+        presence_unverified_ghost = (
+            classification is Classification.GHOST_ATTACK and not presence_known
+        )
+        if presence_unverified_ghost:
+            # The model claimed a ghost attack without verified presence. The
+            # deterministic gate refuses to auto-contain on an unverifiable
+            # physical claim: downgrade the label and require a human.
+            classification = Classification.THREAT_CRITICAL
+
         if classification is Classification.BENIGN_AUTHORIZED:
             # Deterministic override: an LLM cannot whitelist an event on its own.
             classification = Classification.BENIGN_UNKNOWN
@@ -229,7 +238,7 @@ class PolicyEngine:
                 evaluated_at=moment,
             )
 
-        if confidence >= self.min_auto_confidence:
+        if confidence >= self.min_auto_confidence and not presence_unverified_ghost:
             approved, limited = self._rate_limit(actions)
             mode = PolicyMode.AUTO
             reason = (
@@ -245,6 +254,21 @@ class PolicyEngine:
                 operator_present=operator_present,
                 approved_actions=approved,
                 rate_limited_actions=limited,
+                evaluated_at=moment,
+            )
+
+        if presence_unverified_ghost and confidence >= self.min_approval_confidence:
+            return PolicyOutcome(
+                classification=classification,
+                severity=proposed.severity,
+                confidence=confidence,
+                mode=PolicyMode.APPROVAL,
+                reason=(
+                    "model claimed GHOST_ATTACK but operator presence is unknown "
+                    "(no calibrated baseline); containment requires human approval"
+                ),
+                operator_present=operator_present,
+                pending_actions=actions,
                 evaluated_at=moment,
             )
 

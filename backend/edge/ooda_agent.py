@@ -57,7 +57,11 @@ Schema:
 
 Rules:
 - Only propose an action you can justify from the evidence.
-- If operator_present is false and a privileged command ran, classify GHOST_ATTACK.
+- If presence_known is false, you MUST NOT classify GHOST_ATTACK. Presence is
+  unknown, not absent. Use THREAT_CRITICAL (or BENIGN_UNKNOWN) with confidence
+  below 0.85 so a human approves any containment.
+- Only if presence_known is true AND operator_present is false AND a privileged
+  command ran may you classify GHOST_ATTACK.
 - If change_ticket_valid is true, classify BENIGN_AUTHORIZED and propose no actions.
 - Never invent IPs, session tokens or file names; use the ones in the evidence."""
 
@@ -113,13 +117,22 @@ class OODAAgent:
         evidence = self.build_evidence(events, vision, moment)
         observe_ms = round((time.perf_counter() - observe_started) * 1000, 2)
 
-        decision = await self.decide(incident.id, evidence)
+        decision = await self.decide(incident.id, evidence, scenario=scenario)
         decision.latency_ms = round(decision.latency_ms + observe_ms, 2)
 
         decision.actions = self.enrich_actions(decision.actions, events, decision)
         policy_outcome = self.policy.evaluate(
             events=events, proposed=decision, vision=vision, now=moment
         )
+        if policy_outcome.classification is not decision.classification:
+            # The deterministic gate can override an unverifiable model label
+            # (for example GHOST_ATTACK with unknown presence). The incident must
+            # report the final, defensible label, not the model's raw claim.
+            decision.reasoning = (
+                decision.reasoning
+                + f" | policy_reclassified={policy_outcome.classification.value}"
+            ).strip(" |")
+            decision.classification = policy_outcome.classification
 
         results: list[MCPActionResult] = []
         for action in policy_outcome.approved_actions:
@@ -195,7 +208,11 @@ class OODAAgent:
     # -- Decide --------------------------------------------------------------
 
     async def decide(
-        self, incident_id: str, evidence: dict[str, Any]
+        self,
+        incident_id: str,
+        evidence: dict[str, Any],
+        *,
+        scenario: str = "unknown",
     ) -> OODADecision:
         messages = [
             {"role": "system", "content": OODA_SYSTEM_PROMPT},
@@ -205,8 +222,12 @@ class OODAAgent:
                 + json.dumps(evidence, indent=2, ensure_ascii=False),
             },
         ]
+        # Fixtures are keyed by task. Including the scenario means replay mode can
+        # answer scenario B and C with their own recorded answers instead of
+        # replaying the scenario-A threat verdict for everything.
+        task = f"ooda:{scenario}" if scenario in ("A", "B", "C") else "ooda"
         try:
-            payload, response = await self.llm.complete_json(messages, task="ooda")
+            payload, response = await self.llm.complete_json(messages, task=task)
         except Exception as exc:  # noqa: BLE001 - never let the loop crash
             return self._fallback_decision(
                 incident_id, f"LLM unavailable: {type(exc).__name__}: {exc}"

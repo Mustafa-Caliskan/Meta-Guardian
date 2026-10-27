@@ -49,7 +49,9 @@ def test_usb_watcher_detects_new_volume_with_payload(tmp_path: Path):
 def test_usb_watcher_reports_removal(tmp_path: Path):
     usb_root = tmp_path / "usb"
     usb_root.mkdir()
-    provider = FakePartitions([Partition(device="E:", mountpoint=str(usb_root))])
+    provider = FakePartitions(
+        [Partition(device="E:", mountpoint=str(usb_root), fstype="exFAT", opts="removable")]
+    )
     watcher = USBWatcher(EventBus(), partition_provider=provider)
     watcher.poll_once()
 
@@ -69,11 +71,47 @@ def test_usb_watcher_clean_volume_is_medium(tmp_path: Path):
     usb_root = tmp_path / "usb"
     usb_root.mkdir()
     (usb_root / "readme.txt").write_text("nothing", encoding="utf-8")
-    provider.partitions = [Partition(device="E:", mountpoint=str(usb_root))]
+    provider.partitions = [
+        Partition(device="E:", mountpoint=str(usb_root), fstype="FAT32", opts="removable")
+    ]
 
     events = watcher.poll_once()
     assert events[0].severity is Severity.MEDIUM
     assert events[0].payload["findings"] == []
+    assert events[0].payload["is_removable"] is True
+
+
+def test_usb_watcher_ignores_fixed_and_network_mounts(tmp_path: Path):
+    provider = FakePartitions([])
+    watcher = USBWatcher(EventBus(), partition_provider=provider)
+    watcher.poll_once()
+
+    fixed = tmp_path / "fixed"
+    fixed.mkdir()
+    (fixed / "payload.ps1").write_text("staged", encoding="utf-8")
+    provider.partitions = [
+        Partition(device="C:", mountpoint=str(fixed), fstype="NTFS", opts="rw,fixed"),
+        Partition(device="Z:", mountpoint=str(tmp_path / "share"), fstype="NTFS", opts="rw"),
+    ]
+
+    assert watcher.poll_once() == []
+
+
+def test_usb_watcher_accepts_explicit_removable_opt(tmp_path: Path):
+    provider = FakePartitions([])
+    watcher = USBWatcher(EventBus(), partition_provider=provider)
+    watcher.poll_once()
+
+    usb_root = tmp_path / "usb"
+    usb_root.mkdir()
+    (usb_root / "payload.ps1").write_text("staged", encoding="utf-8")
+    provider.partitions = [
+        Partition(device="E:", mountpoint=str(usb_root), fstype="NTFS", opts="rw,removable")
+    ]
+
+    events = watcher.poll_once()
+    assert len(events) == 1
+    assert events[0].payload["is_removable"] is True
 
 
 def _write_log(path: Path, entries: list[dict]) -> None:

@@ -32,6 +32,10 @@ class ReplayLLM(BaseLLM):
     ) -> LLMResponse:
         started = time.perf_counter()
         path = self._fixture_path(task)
+        if not path.exists() and ":" in task:
+            # Scenario-specific fixtures are optional: fall back to the generic
+            # recording so replay never dies just because one variant is absent.
+            path = self._fixture_path(task.split(":", 1)[0])
         if not path.exists():
             raise FileNotFoundError(
                 f"no replay fixture for task {task!r} at {path}. "
