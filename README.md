@@ -2,42 +2,102 @@
 
 **Autonomous cyber-physical security, live quarantine and self-healing SOC agent.**
 
-Meta-Guardian fuses live camera vision with real-time OS/USB and network telemetry at the edge, neutralizes active threats via an open-weight MCP agent, and autonomously hot-patches vulnerable services in the cloud.
+Built for the **Meta Global AI Developer Hackathon 2026** (Indie Track) by Mustafa ?al??kan.
 
-Built for the **Meta Global AI Developer Hackathon 2026** (Indie Track) by Mustafa Çalışkan.
+## Why this exists
 
----
+Airport and critical-facility operations already have cameras and already have logs, but the
+two never meet. A camera sees a person at a console; the SIEM sees a privileged command
+from an unknown IP; neither system can answer the question that actually matters: *was an
+authorised human physically present when this action ran?* After field experience at
+Sabiha G?k?en, the operational gap was concrete: physical access control and cyber
+telemetry are separate budgets, separate teams and separate alerts, so the one event that
+matters ? a physical action correlated with a digital one ? is the one nobody can prove.
+Stitching that gap today means sending 30 FPS of video to a cloud, which no operations team
+will do for privacy, bandwidth and cost reasons.
 
-## Why it is different
+## What we built
 
-Most security demos stop at a dashboard. Meta-Guardian closes the loop:
+Meta-Guardian is a blue-team agent that runs on the edge host, not in a dashboard. It watches
+removable media and the protected service's audit log, captures exactly **one** camera frame
+per event, and asks three questions in order: did something physically happen, is the person
+authorised (change ticket plus a calibrated presence check), and does the evidence justify
+action. A deterministic policy gate ? not the model ? decides whether containment executes
+automatically, waits for a human, or is suppressed. Containment is real: the payload is moved
+to a read-only vault, the attacker IP is blocked at the gateway, the session is revoked. Then
+the agent proves the fix instead of asserting it: it replays the same attack and requires
+`HTTP 200` to become `HTTP 403`, rolling back automatically if it does not.
 
-1. **Real triggers** — a physical USB stick inserted into the machine (`psutil`) or a real request against a local FastAPI target service.
-2. **Real physical verification** — the webcam frame at incident time is analyzed to confirm whether an authorized operator is present (ghost-attack detection) or someone plugged in removable media.
-3. **Real containment** — MCP tools quarantine the payload file, block the attacker IP and revoke the session token.
-4. **Real self-healing** — the vulnerable endpoint is hot-patched, then the *same* attack is replayed live: `HTTP 200 (data leaked)` becomes `HTTP 403 (blocked)`.
+## What is proven, and how
 
-No fake door locks, no simulated server rooms.
+Every claim below is reproducible from the repository, with the command next to it.
+
+- **The detection loop is closed.** `python scripts/trigger_attack.py --exfil --watch --patch`
+  sends a real HTTP request to the protected service. No synthetic events, no test hook. The
+  audit log drives the watcher, the correlator opens the incident and containment runs.
+- **Containment and self-healing are measured**, not asserted: MTTD 236 ms, MTTR 42 ms,
+  patch-and-verify 123 ms on the Docker stack (`GET /api/metrics`).
+- **Cloud output is verified, not trusted.** All 7 archive citations in the 1M-context run
+  were checked against real file lines, and `earliest_discovery` matched the archive manifest
+  exactly (`docs/FULL_ARCHIVE_RUN.md`).
+- **The physical claim is a real model**, not a drawn rectangle: segmentation runs through
+  Modal `sam-vit_b` and the mask is the model's own output (`scripts/test_modal_sam.py --bridge`).
+- **Versus a credible legacy engine**, on the same three scenarios: 50% vs 100% recall on
+  attacks and 100% vs 0% false positives on the approved-maintenance case
+  (`python scripts/benchmark_baseline.py --patch`).
+- **Machine-checkable**: 241 tests, and every module runs offline in `mock` mode.
 
 ## Architecture
 
-```
-Webcam / USB / target API
-          │
-          ▼
-  Edge watcher + correlator        (backend/edge)
-          │
-          ▼
-  Vision evidence (SAM 3.1)        (backend/vision)
-          │
-          ▼
-  OODA decision + MCP actions      (Muse Glimmer)
-          │
-          ▼
-  1M-context forensics             (Muse Spark 1.3 / Spark Open)
-          │
-          ▼
-  Live auto-patch + replay test    (Muse Spark 1.3 plans the rule)
+```mermaid
+flowchart LR
+    subgraph EDGE["Edge host (physical sensors)"]
+        USB["USBWatcher<br/>psutil removable media"]
+        NET["NetWatcher<br/>tails target audit log"]
+        CAM["Webcam capture<br/>one frame per event"]
+        PRES["PresenceDetector<br/>baseline frame diff"]
+    end
+
+    subgraph CORE["Control plane (docker: soc-cockpit)"]
+        BUS["EventBus"]
+        COR["Correlator<br/>30 s window, dedupe, cooldown"]
+        OODA["OODA agent<br/>Observe ? Orient ? Decide ? Act"]
+        POL["PolicyEngine<br/>tickets + confidence bands + rate limit"]
+        MCP["MCP server<br/>quarantine / block / revoke / kill"]
+        MET["Metrics + WebSocket<br/>MTTD, MTTR, sparkline"]
+    end
+
+    subgraph CLOUD["Cloud / model tiers"]
+        SAM["SAM tiers<br/>Meta sam-3.1 ? Modal sam-vit_b ? frame diff"]
+        OODA_M["Muse Spark Open<br/>OODA decision"]
+        FOR["Forensics 1M ctx<br/>Spark Open / Spark 1.3"]
+        PAT["Patcher<br/>deterministic template + verify"]
+    end
+
+    subgraph TARGET["Protected service (docker: target-api)"]
+        API["Aviation Ops API<br/>/ops/data vulnerable by design"]
+        GW["Gateway state<br/>blocklist, sessions, WAF rule"]
+    end
+
+    USB --> BUS
+    NET --> BUS
+    BUS --> COR
+    CAM --> PRES
+    PRES --> OODA
+    COR --> OODA
+    OODA --> OODA_M
+    OODA --> SAM
+    OODA --> POL
+    POL -->|approved actions| MCP
+    MCP --> GW
+    MCP -->|quarantine receipt| USB
+    OODA --> MET
+    OODA --> FOR
+    FOR --> PAT
+    PAT -->|apply rule + replay attack| API
+    PAT -->|200 ? 403 proof| MET
+    API --> NET
+    MET -->|"WebSocket /ws"| UI["SOC cockpit<br/>vanilla JS"]
 ```
 
 ## Repository layout
@@ -50,8 +110,10 @@ backend/
   models.py          Pydantic schemas shared by every layer
   llm/               Provider abstraction: mock, replay, live, record
   vision/            Webcam capture, ROI detection, SAM bridge
-  edge/              USB/network watcher, policy engine, OODA agent, MCP server
-  cloud/             Sanitizer, forensics, hot-patcher
+  edge/              USB/network watcher, correlator, policy engine, OODA agent, MCP server
+  cloud/             Sanitizer, citation-verified forensics, hot-patcher
+  casefile.py        SOC case file export (markdown + json)
+  netguard.py        infrastructure address classification (never blockable)
 frontend/            Dark SOC cockpit (vanilla JS, no Streamlit)
 data/                Scenario frames, 30-day SIEM archive, replay fixtures
 scripts/             Data generation, attack trigger, benchmarks
@@ -99,15 +161,16 @@ python scripts/smoke_test_providers.py --probe
 | `live` | Calls Meta / Baseten / Fireworks OpenAI-compatible endpoints. |
 | `record` | Calls live endpoints and stores the replies as replayable fixtures. |
 
-### Model routing (verified against `dev.meta.ai/docs`)
+### Model routing: which model, where, and why
 
-| Layer | Provider | Model | Notes |
+| Layer | Provider | Model | Why this one |
 |---|---|---|---|
-| Edge OODA | self-hosted / Fireworks / Baseten | `muse-glimmer` | Open-weight. Exact served id depends on your endpoint; verify with the smoke test. |
-| Forensics (1M ctx) | Meta Model API | `muse-spark-1.3` | Hosted; set `MODEL_API_KEY` ( `META_API_KEY` also accepted). |
-| Patch planning | Meta Model API | `muse-spark-1.3` | Deterministic templates only. |
-| Physical verification | Meta Model API | `sam-3.1` | One frame per event, not 30 FPS. |
-| Open-weight bonus | Baseten | `meta-models/muse-spark-open-1026` | Hackathon participant-guide override of `meta-models/muse-spark-open`. |
+| Edge OODA | self-hosted / Fireworks / Baseten | `muse-glimmer` | Open-weight and edge-sized: the decision must happen next to the sensor, and camera frames must not leave the host. |
+| OODA reasoning in the demo / bonus track | Baseten | `meta-models/muse-spark-open-1026` | Open weights served remotely, so the "$10k open-weights" claim is backed by a real pipeline call rather than a smoke test. Hackathon participant-guide id. |
+| Forensics (1M context) | Meta Model API | `muse-spark-1.3` | 30 days of SIEM history plus policy text needs the hosted 1M window; measured at 1,026,768 input tokens in one request. |
+| Patch planning | Meta Model API | `muse-spark-1.3` | Only selects an allowlisted template. The model never emits executable code. |
+| Physical evidence | Meta Model API ? Modal ? offline | `sam-3.1` ? `sam-vit_b` ? frame diff | Three tiers so the pixel mask is always produced by a real segmenter when one is reachable, and honestly labelled when it is not. |
+| Containment | none | MCP tools | Deliberate: destructive actions are deterministic code paths, not model output. |
 
 `muse-spark-open-1m` is **not** a Model API model id; the 1M context lives on
 `muse-spark-1.3`. **Muse Code is a terminal/CI coding agent, not an API model** —
@@ -220,20 +283,54 @@ Writes `data/runtime/kpi_report.json` with MTTD, MTTC, patch latency, end-to-end
 latency, precision/recall over A/B/C and the assumed bandwidth saving. The script
 labels stub timings when the target is down; it never presents them as real.
 
-Last local run (Windows, mock LLM, real target on `:8001`, `--patch`):
+### Live measurements (Docker stack, `GET /api/metrics`)
 
-| Metric | Value |
+`docker compose up --build -d` then the live attack button or
+`scripts/trigger_attack.py`. Target on `:8001`, `LLM_MODE=mock` so the numbers are
+reproducible offline.
+
+| Metric | Measured | What it covers |
+|---|---|---|
+| MTTD | **236 ms** | first correlated event (request `ts`) ? OODA decision |
+| MTTR | **42 ms** | decision ? last successful MCP action |
+| Patch + verification | **123 ms** | apply rule ? replay attack ? `HTTP 403` observed |
+| Actions succeeded / failed | 2 / 0 | block IP plus (when a session exists) revoke |
+| False positives on Scenario C | 0 | approved maintenance is suppressed |
+| Incidents opened per attack | 1 | the verification replay is not re-detected |
+
+Live model mode adds provider latency to MTTD: the recorded Baseten OODA call takes
+**2.8?3.5 s**, which is why segmentation and forensics run after the incident is
+broadcast instead of inside the detection path.
+
+### 1M-context forensics run
+
+| Metric | Measured |
 |---|---|
-| MTTD (edge correlation) | 0.20 ms |
-| MTTC (containment, 3 actions incl. HTTP) | 816 ms |
-| Patch + replay verification | 1 460 ms |
-| End-to-end (trigger -> 403 proven) | 1 758 ms |
-| Precision / recall (A, B, C) | 1.00 / 1.00 |
-| False positives on Scenario C | 0 |
-| Patch verified | `HTTP 200 -> 403` |
+| Input tokens in a single request | **1,026,768** (hard limit 1,048,544) |
+| Archive lines sent | 12,274 of 12,773 (oldest ~4% benign traffic trimmed) |
+| Citations verified against real lines | **7 / 7** |
+| `earliest_discovery` vs archive manifest | exact match (`2026-10-23T16:43:00Z`) |
+| Wall time | 13.5 s |
 
-These are single-machine numbers from one run, not a benchmark suite. Live LLM
-mode adds model latency on top (the recorded OODA call took ~2.8 s).
+The model quoted the archive verbatim but miscounted line numbers by 8; each
+excerpt was re-resolved by a unique verbatim match and the correction is recorded
+in `docs/FULL_ARCHIVE_RUN.md`.
+
+### Naive rule engine vs Meta-Guardian
+
+Same three scenarios, same data, `python scripts/benchmark_baseline.py --patch`.
+The baseline is a credible legacy engine (static extension/hash deny-list, static
+IP deny-list, no camera, no ticket correlation, no patching), not a strawman.
+
+| Scenario | Naive rules | Meta-Guardian |
+|---|---|---|
+| A ? payload + exfiltration | detects the file, **cannot stop the export** | `THREAT_CRITICAL`, contained, patch verified |
+| B ? ghost attack | **miss** (no camera) | `GHOST_ATTACK`, session revoked |
+| C ? approved maintenance | **false alarm** | `BENIGN_AUTHORIZED`, zero actions |
+| Recall (A + B) | **50%** | **100%** |
+| False positives on C | **100%** | **0%** |
+
+Full reasoning and caveats: [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
 
 Scenario C (authorized maintenance) needs a local ticket file:
 
@@ -322,6 +419,29 @@ returned box `[228,347,119,52]`, score ? 0.80, inference ? 20 s (CPU), cold star
 adds ~10 s. The mask saved by the cockpit is the model output byte for byte.
 Segmentation runs *after* the incident is broadcast (`SEGMENTATION_ASYNC=1`), so
 model latency never inflates MTTD.
+
+## Case files and the live attack button
+
+Every incident can be exported as a forensic artefact, derived entirely from the
+stored record:
+
+```powershell
+curl "http://127.0.0.1:8000/api/incidents/<id>/casefile?format=markdown"   # SOC report
+curl "http://127.0.0.1:8000/api/incidents/<id>/casefile?format=json"       # machine-readable
+```
+
+The report contains the correlated events with their real request timestamps,
+physical evidence (frame and mask file names, ROI, confidence, `presence_known`,
+segmentation model), the OODA decision, the policy verdict, every MCP action with
+success and detail, the forensics citations with verification flags, and the patch
+(`200 ? 403`, fingerprint, rollback state). The cockpit exposes it as a
+**CASE FILE** download button per incident.
+
+`POST /api/attack` (cockpit: **FIRE LIVE ATTACK**) sends a genuine exfiltration
+request to the protected service ? no verification header, rate limited to one
+per 10 s, returning `429` with `Retry-After` otherwise. `X-Forwarded-For` is only
+added when `TRUST_FORWARDED_FOR=1`, so the blocklist target is realistic without
+pretending a forged header is authoritative.
 
 ## Docker
 
