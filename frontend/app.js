@@ -361,6 +361,13 @@
       inspect.addEventListener("click", () => loadIncident(incident.id));
       actions.appendChild(inspect);
 
+      const caseFile = document.createElement("button");
+      caseFile.className = "btn";
+      caseFile.textContent = "CASE FILE";
+      caseFile.title = "Download the SOC case file as Markdown";
+      caseFile.addEventListener("click", () => downloadCaseFile(incident.id, caseFile));
+      actions.appendChild(caseFile);
+
       const analyze = document.createElement("button");
       analyze.className = "btn";
       analyze.textContent = incident.forensics ? "RE-ANALYZE" : "ANALYZE";
@@ -607,6 +614,18 @@
     } finally {
       button.disabled = false;
     }
+  }
+
+  function downloadCaseFile(id, button) {
+    button.disabled = true;
+    const anchor = document.createElement("a");
+    anchor.href = `/api/incidents/${encodeURIComponent(id)}/casefile?format=markdown`;
+    anchor.download = `meta-guardian-casefile-${id}.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    pushLocalEvent("info", `case file downloaded for ${id}`);
+    button.disabled = false;
   }
 
   async function runForensics(id, button) {

@@ -24,10 +24,11 @@ from typing import Any, Deque
 
 import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .casefile import build_casefile, casefile_filename, render_markdown
 from .config import PROJECT_ROOT, SCENARIOS_DIR, Settings, get_settings
 from .cloud.forensics import ForensicsEngine
 from .cloud.patcher import Patcher
@@ -997,6 +998,30 @@ def create_app(
         if incident is None:
             raise HTTPException(status_code=404, detail="incident not found")
         return incident.model_dump(mode="json")
+
+    @app.get("/api/incidents/{incident_id}/casefile")
+    async def incident_casefile(incident_id: str, format: str = "markdown"):
+        incident = state.incidents.get(incident_id)
+        if incident is None:
+            raise HTTPException(status_code=404, detail="incident not found")
+
+        fmt = format.lower()
+        if fmt not in ("markdown", "md", "json"):
+            raise HTTPException(
+                status_code=422, detail="format must be markdown or json"
+            )
+
+        document = build_casefile(incident)
+        filename = casefile_filename(incident, "json" if fmt == "json" else "markdown")
+        disposition = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+        if fmt == "json":
+            return JSONResponse(content=document, headers=disposition)
+        return PlainTextResponse(
+            render_markdown(document),
+            media_type="text/markdown; charset=utf-8",
+            headers=disposition,
+        )
 
     @app.get("/api/incidents/{incident_id}/frame")
     async def incident_frame(incident_id: str):
