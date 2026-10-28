@@ -228,7 +228,7 @@ class AppState:
                 self._remember(incident)
                 await self.publish_incident(incident)
                 if self.settings.segmentation_async:
-                    await self.enrich_segmentation(incident)
+                    self._schedule_segmentation(incident)
                 return incident
             except Exception as exc:  # noqa: BLE001 - never kill the bus
                 self._log_vision_error("pipeline", result.reason, exc)
@@ -365,7 +365,7 @@ class AppState:
             self._remember(incident)
             await self.publish_incident(incident)
             if self.settings.segmentation_async:
-                await self.enrich_segmentation(incident)
+                self._schedule_segmentation(incident)
             return incident
         finally:
             if ticket_added is not None:
@@ -571,6 +571,19 @@ class AppState:
             frame_source=captured.source,
             presence_known=presence_known,
         )
+
+    def _schedule_segmentation(self, incident: Incident) -> None:
+        """Run segmentation off the critical path and outside the pipeline lock.
+
+        A segmentation call can take 20-30 s on CPU. Awaiting it inside the
+        bundle lock would freeze the cockpit button and queue every later
+        incident behind it. Each task mutates only its own incident.
+        """
+        task = asyncio.create_task(
+            self.enrich_segmentation(incident), name=f"segment-{incident.id}"
+        )
+        self._pipeline_tasks.add(task)
+        task.add_done_callback(self._pipeline_tasks.discard)
 
     async def enrich_segmentation(self, incident: Incident) -> None:
         """Run the real segmenter after the incident is already visible.

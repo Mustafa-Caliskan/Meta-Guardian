@@ -277,3 +277,70 @@ def test_net_watcher_ignores_verification_probes(tmp_path: Path):
 
     assert len(events) == 1
     assert events[0].payload["ip"] == "203.0.113.66"
+
+
+def test_net_watcher_uses_the_request_timestamp_from_the_log(tmp_path: Path):
+    log = tmp_path / "requests.jsonl"
+    request_ts = "2026-10-01T10:00:00.000+00:00"
+    _write_log(
+        log,
+        [
+            {
+                "seq": 1,
+                "ts": request_ts,
+                "ip": "203.0.113.66",
+                "method": "GET",
+                "path": "/api/v1/ops/data",
+                "query": "aircraft=ALL",
+                "status": 200,
+                "flags": ["exfil_marker:aircraft=all"],
+            }
+        ],
+    )
+    watcher = NetWatcher(EventBus(), log, ignore_history=False)
+    events = watcher.poll_once()
+
+    assert len(events) == 1
+    assert events[0].timestamp.isoformat().startswith("2026-10-01T10:00:00")
+
+
+def test_net_watcher_falls_back_when_ts_is_missing(tmp_path: Path):
+    log = tmp_path / "requests.jsonl"
+    _write_log(
+        log,
+        [
+            {
+                "seq": 1,
+                "ip": "203.0.113.66",
+                "method": "GET",
+                "path": "/api/v1/ops/data",
+                "query": "aircraft=ALL",
+                "status": 200,
+                "flags": ["exfil_marker:aircraft=all"],
+            }
+        ],
+    )
+    watcher = NetWatcher(EventBus(), log, ignore_history=False)
+    events = watcher.poll_once()
+    assert len(events) == 1
+    assert events[0].timestamp.tzinfo is not None
+
+
+def test_accept_all_mounts_is_a_labelled_demo_escape_hatch(tmp_path: Path):
+    provider = FakePartitions([])
+    watcher = USBWatcher(
+        EventBus(), partition_provider=provider, accept_all_mounts=True
+    )
+    watcher.poll_once()
+
+    fixed = tmp_path / "usbssd"
+    fixed.mkdir()
+    (fixed / "payload.ps1").write_text("staged", encoding="utf-8")
+    provider.partitions = [
+        Partition(device="F:", mountpoint=str(fixed), fstype="NTFS", opts="rw,fixed")
+    ]
+
+    events = watcher.poll_once()
+    assert len(events) == 1
+    assert events[0].payload["is_removable"] is False
+    assert events[0].payload["accept_all_mounts"] is True

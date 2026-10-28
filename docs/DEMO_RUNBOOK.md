@@ -72,6 +72,28 @@ approval required. Honest, but it does not demo the Ghost Attack rule.
 
 ---
 
+## 2b. USB stick that enumerates as "fixed"
+
+Some Windows sticks and USB-SSDs report no `removable` flag and a NTFS
+filesystem, so the removable filter ignores them on purpose. Check the pull-in
+first:
+
+```powershell
+python -c "from backend.edge.usb_net_watcher import default_partition_provider as p; [print(x.device, x.fstype, x.opts, x.is_removable) for x in p()]"
+```
+
+If your stick shows `is_removable=False`, either reformat it as FAT32/exFAT
+(preferred, and the event will then show `is_removable: true`), or for the demo
+only:
+
+```powershell
+$env:MG_USB_ACCEPT_ALL="1"
+```
+
+That switch marks every new mount as removable and stamps
+`accept_all_mounts: true` into the event, so it is visible on camera. Never
+leave it on.
+
 ## 3. Start the two services (two terminals)
 
 ```powershell

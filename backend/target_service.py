@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Deque
 
+import hmac
+
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -194,6 +196,13 @@ async def require_internal_token(
         raise HTTPException(status_code=401, detail="invalid internal API token")
 
 
+def is_verification_probe(supplied: str | None) -> bool:
+    expected = settings.internal_api_token
+    if not expected or not supplied:
+        return False
+    return hmac.compare_digest(supplied, expected)
+
+
 @app.middleware("http")
 async def audit_middleware(request: Request, call_next):
     started = time.perf_counter()
@@ -201,7 +210,13 @@ async def audit_middleware(request: Request, call_next):
     token = request.headers.get("x-session-token")
     # The patcher replays the attack to prove the fix. That replay is a probe,
     # not attacker traffic, and must never feed the detector again.
-    probe = request.headers.get("x-mg-probe") == "1"
+    #
+    # The marker is authenticated with the internal shared secret. A public
+    # sentinel like "x-mg-probe: 1" would be a documented detection bypass: any
+    # attacker reading this repository could hide behind it. Rules:
+    #   * no INTERNAL_API_TOKEN configured -> the header is ignored entirely
+    #   * token configured -> the header must carry that exact value
+    probe = is_verification_probe(request.headers.get("x-mg-probe"))
 
     with STATE.lock:
         blocked = ip in STATE.blocked_ips and not is_protected_address(ip)

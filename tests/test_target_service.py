@@ -165,7 +165,14 @@ def test_target_service_module_exposes_app():
     assert target_service.app.title == "Aviation Ops API"
 
 
-def test_probe_header_is_recorded_and_does_not_change_status(client: TestClient):
+def _last_entry() -> dict:
+    import json
+
+    return json.loads(STATE.log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+
+
+def test_public_probe_header_is_ignored_when_no_token_is_configured(client: TestClient):
+    """A public sentinel would be a documented detection bypass."""
     response = client.get(
         "/api/v1/ops/data",
         params={"aircraft": "ALL", "limit": 99999},
@@ -173,16 +180,45 @@ def test_probe_header_is_recorded_and_does_not_change_status(client: TestClient)
     )
     assert response.status_code == 200
 
-    import json
+    entry = _last_entry()
+    assert entry["probe"] is False
+    assert "exfil_marker:aircraft=all" in entry["flags"]
 
-    entry = json.loads(STATE.log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+
+def test_probe_header_with_wrong_token_is_ignored(client: TestClient, monkeypatch):
+    import dataclasses
+
+    from backend import target_service
+
+    patched = dataclasses.replace(target_service.settings, internal_api_token="s3cret")
+    monkeypatch.setattr(target_service, "settings", patched)
+
+    client.get(
+        "/api/v1/ops/data",
+        params={"aircraft": "ALL", "limit": 99999},
+        headers={"x-mg-probe": "1"},
+    )
+    assert _last_entry()["probe"] is False
+
+
+def test_probe_header_with_correct_token_is_recorded(client: TestClient, monkeypatch):
+    import dataclasses
+
+    from backend import target_service
+
+    patched = dataclasses.replace(target_service.settings, internal_api_token="s3cret")
+    monkeypatch.setattr(target_service, "settings", patched)
+
+    client.get(
+        "/api/v1/ops/data",
+        params={"aircraft": "ALL", "limit": 99999},
+        headers={"x-mg-probe": "s3cret"},
+    )
+    entry = _last_entry()
     assert entry["probe"] is True
     assert "exfil_marker:aircraft=all" in entry["flags"]
 
 
 def test_non_probe_requests_are_marked_false(client: TestClient):
     client.get("/api/v1/ops/flights")
-    import json
-
-    entry = json.loads(STATE.log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
-    assert entry["probe"] is False
+    assert _last_entry()["probe"] is False

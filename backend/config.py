@@ -116,6 +116,7 @@ class Settings:
     max_actions_per_minute: int = 30
     kill_allowlist: str = ""
 
+    usb_accept_all: bool = False
     correlation_window_seconds: float = 30.0
     correlation_cooldown_seconds: float = 10.0
     operator_motion_threshold: float = 0.004
@@ -230,6 +231,7 @@ def get_settings() -> Settings:
         action_timeout=_env_float("ACTION_TIMEOUT", 10.0),
         max_actions_per_minute=_env_int("MAX_ACTIONS_PER_MINUTE", 30),
         kill_allowlist=_env("KILL_ALLOWLIST", ""),
+        usb_accept_all=_env("MG_USB_ACCEPT_ALL", "0") in ("1", "true", "True"),
         correlation_window_seconds=_env_float("CORRELATION_WINDOW_SECONDS", 30.0),
         correlation_cooldown_seconds=_env_float("CORRELATION_COOLDOWN_SECONDS", 10.0),
         operator_motion_threshold=_env_float("OPERATOR_MOTION_THRESHOLD", 0.004),

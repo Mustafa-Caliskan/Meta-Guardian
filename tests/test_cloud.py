@@ -344,6 +344,49 @@ async def test_patcher_reports_a_failed_before_probe():
     assert "before probe failed" in result.verification_note
 
 
+async def test_patcher_marks_replays_with_the_internal_token():
+    seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        record = {
+            "path": request.url.path,
+            "probe": request.headers.get("x-mg-probe", ""),
+        }
+        seen.append(record)
+        if request.url.path == "/api/v1/ops/data":
+            return httpx.Response(200)
+        return httpx.Response(200, json={"applied": True})
+
+    patcher = Patcher(
+        target_base_url="http://gw",
+        transport=httpx.MockTransport(handler),
+        internal_token="s3cret",
+    )
+    await patcher.patch(sample_incident(), sample_report())
+
+    probes = [item for item in seen if item["path"] == "/api/v1/ops/data"]
+    assert probes and all(item["probe"] == "s3cret" for item in probes)
+
+
+async def test_patcher_sends_no_probe_header_without_a_token():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/ops/data":
+            seen.append(request.headers.get("x-mg-probe", ""))
+            return httpx.Response(200)
+        return httpx.Response(200, json={"applied": True})
+
+    patcher = Patcher(
+        target_base_url="http://gw",
+        transport=httpx.MockTransport(handler),
+        internal_token="",
+    )
+    await patcher.patch(sample_incident(), sample_report())
+
+    assert seen and all(value == "" for value in seen)
+
+
 async def test_patcher_sends_internal_token():
     seen: list[str | None] = []
 

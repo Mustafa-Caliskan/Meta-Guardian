@@ -20,6 +20,7 @@ import os
 import time
 from collections import deque
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Deque, Iterable, Protocol
 
@@ -29,7 +30,7 @@ except ImportError:  # pragma: no cover - psutil is a hard dependency at runtime
     psutil = None  # type: ignore[assignment]
 
 from ..config import get_settings
-from ..models import EventSource, EventType, SecurityEvent, Severity
+from ..models import EventSource, EventType, SecurityEvent, Severity, utc_now
 
 SUSPICIOUS_EXTENSIONS = {
     ".ps1",
@@ -106,6 +107,23 @@ class Partition:
         if self.removable_hint:
             return True
         return str(self.fstype).lower() in {"vfat", "exfat", "fat", "fat32", "msdos"}
+
+
+def _entry_timestamp(entry: dict[str, Any]) -> datetime:
+    """Use the request's real timestamp, not the moment the tailer saw it.
+
+    MTTD is measured from the first correlated event to the decision. Stamping
+    the event when the poller happens to read it would silently hide up to one
+    poll interval of detection delay.
+    """
+    raw = entry.get("ts")
+    if isinstance(raw, str):
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return utc_now()
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return utc_now()
 
 
 def default_partition_provider() -> Iterable[Partition]:
@@ -187,11 +205,21 @@ class USBWatcher:
         partition_provider: Callable[[], Iterable[Partition]] | None = None,
         poll_interval: float = 1.0,
         scan_extensions: set[str] | None = None,
+        accept_all_mounts: bool | None = None,
     ) -> None:
         self.bus = bus
         self.partition_provider = partition_provider or default_partition_provider
         self.poll_interval = poll_interval
         self.scan_extensions = scan_extensions or SUSPICIOUS_EXTENSIONS
+        # Demo-only escape hatch: some Windows sticks/USB-SSDs enumerate as
+        # "fixed", so the removable filter would silently miss the flagship demo.
+        # Off by default and logged on every event so it can never be mistaken
+        # for normal detection behaviour.
+        self.accept_all_mounts = (
+            get_settings().usb_accept_all
+            if accept_all_mounts is None
+            else accept_all_mounts
+        )
         self._known: dict[str, Partition] = {}
         self._primed = False
         self._task: asyncio.Task | None = None
@@ -212,7 +240,7 @@ class USBWatcher:
         for mountpoint, part in current.items():
             if mountpoint in self._known:
                 continue
-            if not part.is_removable:
+            if not part.is_removable and not self.accept_all_mounts:
                 # Ignore fixed/network/image mounts: they are not physical media.
                 continue
             events.append(self._on_inserted(part))
@@ -243,6 +271,7 @@ class USBWatcher:
                 "opts": part.opts,
                 "removable_hint": part.removable_hint,
                 "is_removable": part.is_removable,
+                "accept_all_mounts": self.accept_all_mounts,
                 "findings": findings,
                 "autorun_executed": False,
             },
@@ -370,6 +399,7 @@ class NetWatcher:
                         source=EventSource.NETWORK,
                         type=self._event_type(entry),
                         severity=self._severity(entry),
+                        timestamp=_entry_timestamp(entry),
                         summary=(
                             f"{entry.get('method', '?')} {entry.get('path', '?')} "
                             f"from {entry.get('ip', '?')} -> HTTP {entry.get('status')}"

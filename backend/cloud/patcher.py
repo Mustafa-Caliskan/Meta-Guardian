@@ -58,9 +58,14 @@ async def default_attack(
     headers: dict[str, str] | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     timeout: float = 10.0,
+    probe_token: str | None = None,
 ) -> AttackProbe:
     started = time.perf_counter()
-    request_headers = {"x-mg-probe": "1"}
+    request_headers: dict[str, str] = {}
+    if probe_token:
+        # Authenticated marker: the target only honours it when it matches its
+        # own INTERNAL_API_TOKEN, so it cannot be forged from outside.
+        request_headers["x-mg-probe"] = probe_token
     if headers:
         request_headers.update(headers)
     async with httpx.AsyncClient(
@@ -177,7 +182,11 @@ class Patcher:
         )
 
         try:
-            before = await self.attack(self.target_base_url, transport=self.transport)
+            before = await self.attack(
+                self.target_base_url,
+                transport=self.transport,
+                probe_token=self.internal_token or None,
+            )
         except Exception as exc:  # noqa: BLE001
             result.before_status = None
             result.verification_note = f"before probe failed: {type(exc).__name__}: {exc}"
@@ -197,7 +206,11 @@ class Patcher:
             return result
 
         try:
-            after = await self.attack(self.target_base_url, transport=self.transport)
+            after = await self.attack(
+                self.target_base_url,
+                transport=self.transport,
+                probe_token=self.internal_token or None,
+            )
             result.after_status = after.status
         except Exception as exc:  # noqa: BLE001
             result.verification_note = f"after probe failed: {type(exc).__name__}: {exc}"

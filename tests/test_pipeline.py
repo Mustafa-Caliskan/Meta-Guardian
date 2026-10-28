@@ -271,3 +271,27 @@ def test_incidents_are_persisted_and_reloaded(tmp_path):
         incidents = client.get("/api/incidents").json()["incidents"]
         assert len(incidents) == 1
         assert incidents[0]["id"] == incident["id"]
+
+
+def test_segmentation_is_scheduled_off_the_response_path(tmp_path, monkeypatch):
+    """A 20 s CPU segmentation must not freeze /api/simulate or the next bundle."""
+    import asyncio
+    import time as _time
+
+    state = build_state(tmp_path)
+    calls: list[str] = []
+
+    async def slow_enrich(incident):
+        calls.append(incident.id)
+        await asyncio.sleep(0.4)
+
+    monkeypatch.setattr(state, "enrich_segmentation", slow_enrich)
+
+    with TestClient(create_app(state)) as client:
+        started = _time.perf_counter()
+        incident = client.post("/api/simulate", json={"scenario": "A"}).json()
+        elapsed = _time.perf_counter() - started
+
+        assert incident["id"]
+        # The HTTP response must not wait for the 0.4 s "slow" segmentation.
+        assert elapsed < 0.4

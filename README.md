@@ -380,7 +380,11 @@ Full table and reasoning: [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
   patch must prove a 403, otherwise the system falls back or rolls back.
 - Removable-media detection uses filesystem and mount options (`removable`,
   `vfat`, `exfat`). It deliberately ignores fixed, network and image mounts, which
-  means a USB disk formatted NTFS without the `removable` flag can be missed.
+  means a USB disk formatted NTFS without the `removable` flag can be missed. Use
+  FAT32/exFAT, or the demo-only `MG_USB_ACCEPT_ALL=1` (recorded in every event).
+- The patcher's verification replay is marked with `x-mg-probe` **set to the
+  internal secret**. The target ignores that header unless the value matches, so
+  it is not a public detection bypass.
 - Operator presence requires a calibrated baseline. If the camera moves, the
   system reports *presence unknown* and never claims a Ghost Attack; a model that
   still claims one is downgraded to human approval by the policy gate.
