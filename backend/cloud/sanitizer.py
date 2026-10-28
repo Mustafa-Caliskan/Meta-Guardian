@@ -19,7 +19,7 @@ SECRET_PATTERNS = [
     re.compile(r"\bBearer\s+[A-Za-z0-9._\-]{12,}\b", re.IGNORECASE),
     re.compile(r"\b[A-Za-z0-9_\-]{32,}\b"),
 ]
-USER_PATH = re.compile(r"([A-Za-z]:\\Users\\[^\\]+|/home/[^/]+)", re.IGNORECASE)
+USER_PATH = re.compile(r"([A-Za-z]:[\\/]Users[\\/][^\\/]+|/home/[^/]+)", re.IGNORECASE)
 SESSION_PATTERN = re.compile(r"^session-[A-Za-z0-9\-_]+$")
 
 
@@ -39,9 +39,8 @@ def safe_path(raw: str | None) -> str | None:
     """Keep only the last two path components; drop the user profile."""
     if not raw:
         return None
-    cleaned = USER_PATH.sub("~", str(raw))
-    path = Path(cleaned)
-    parts = [part for part in path.parts if part not in ("~", path.anchor)]
+    cleaned = USER_PATH.sub("~", str(raw)).replace("\\", "/")
+    parts = [part for part in cleaned.split("/") if part and part not in ("~",)]
     return "/".join(parts[-2:]) if parts else None
 
 
