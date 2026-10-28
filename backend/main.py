@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import time
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -151,6 +152,8 @@ class AppState:
         self._pipeline_lock = asyncio.Lock()
         self._bus_subscribed = False
         self._flush_task: asyncio.Task | None = None
+        self._last_attack_at: float = 0.0
+        self._attack_lock = asyncio.Lock()
         self.real_incidents = 0
         if self.settings.persist_incidents:
             self._load_persisted()
@@ -736,6 +739,86 @@ class AppState:
         await self.publish_incident(incident)
         return incident
 
+    # -- live attack ---------------------------------------------------------
+
+    async def fire_attack(self) -> dict[str, Any]:
+        """Send a genuine exfiltration request to the protected service.
+
+        No verification marker is added: the detection chain must see this as
+        attacker traffic. ``X-Forwarded-For`` is only sent when the deployment
+        opted into trusting it, so the blocklist target stays realistic without
+        pretending a forged header is authoritative.
+        """
+        now = time.monotonic()
+        async with self._attack_lock:
+            elapsed = now - self._last_attack_at
+            cooldown = self.settings.attack_cooldown_seconds
+            if self._last_attack_at and elapsed < cooldown:
+                retry_after = round(cooldown - elapsed, 1)
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "error": "attack rate limited",
+                        "retry_after_seconds": retry_after,
+                    },
+                    headers={"Retry-After": str(max(1, int(retry_after)))},
+                )
+            self._last_attack_at = now
+
+        headers: dict[str, str] = {}
+        spoofed = ""
+        if self.settings.trust_forwarded_for:
+            spoofed = self.settings.demo_attacker_ip
+            headers["x-forwarded-for"] = spoofed
+
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.settings.target_base_url, timeout=10.0
+            ) as client:
+                response = await client.get(
+                    "/api/v1/ops/data",
+                    params={"aircraft": "ALL", "limit": 99999},
+                    headers=headers,
+                )
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"target service unreachable: {type(exc).__name__}: {exc}",
+            ) from exc
+
+        wall_ms = round((time.perf_counter() - started) * 1000, 2)
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+
+        blocked_already = response.status_code == 403 and "block" in response.text.lower()
+        hint = ""
+        if blocked_already:
+            hint = (
+                "the attacker IP is already blocked (or the WAF rule is active); "
+                "reset the target to replay the detection chain"
+            )
+        elif not spoofed and response.status_code < 400:
+            hint = (
+                "TRUST_FORWARDED_FOR is off, so the audit log records the real peer "
+                "address; containment will refuse to block infrastructure ranges"
+            )
+
+        return {
+            "status": response.status_code,
+            "path": "/api/v1/ops/data",
+            "query": "aircraft=ALL&limit=99999",
+            "records_returned": body.get("count"),
+            "leak_surface": body.get("leak_surface"),
+            "attacker_ip": spoofed or None,
+            "blocked_already": blocked_already,
+            "hint": hint,
+            "wall_ms": wall_ms,
+            "incident_expected": response.status_code == 200,
+        }
+
     # -- live metrics --------------------------------------------------------
 
     def metrics(self, window_seconds: int = 300) -> MetricsReport:
@@ -1036,6 +1119,14 @@ def create_app(
         if path is None:
             raise HTTPException(status_code=404, detail="mask not available")
         return FileResponse(path, media_type="image/png")
+
+    @app.post("/api/attack")
+    async def attack() -> dict[str, Any]:
+        result = await state.fire_attack()
+        await state.connections.broadcast(
+            {"type": "attack", "attack": result}
+        )
+        return result
 
     @app.post("/api/simulate")
     async def simulate(request: SimulateRequest) -> dict[str, Any]:

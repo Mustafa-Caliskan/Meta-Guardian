@@ -62,6 +62,8 @@ services:
       MODAL_SAM_TOKEN: ${MODAL_SAM_TOKEN:-}
       MODAL_SAM_TIMEOUT: ${MODAL_SAM_TIMEOUT:-180}
       SEGMENTATION_ASYNC: ${SEGMENTATION_ASYNC:-1}
+      DEMO_ATTACKER_IP: ${DEMO_ATTACKER_IP:-203.0.113.66}
+      ATTACK_COOLDOWN_SECONDS: ${ATTACK_COOLDOWN_SECONDS:-10}
       PERSIST_INCIDENTS: "1"
       # No camera inside the container: presence stays "unknown" and the policy
       # gate downgrades any ghost claim to human approval. Calibrate on the host.

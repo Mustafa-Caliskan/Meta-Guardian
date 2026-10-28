@@ -331,6 +331,78 @@ body::before {
 .scenario .s-detail { display: block; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
 .scenario .s-play { font-family: var(--mono); font-size: 10px; color: var(--cyan); }
 
+/* ------------------------------------------------------------- live attack */
+
+.live-attack {
+  padding: 0 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+  padding-top: 14px;
+}
+
+.btn-attack {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: #ffe3e8;
+  background: linear-gradient(180deg, rgba(255, 84, 112, 0.24), rgba(255, 84, 112, 0.12));
+  border: 1px solid rgba(255, 84, 112, 0.55);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.btn-attack em {
+  font-style: normal;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: rgba(255, 227, 232, 0.72);
+}
+
+.btn-attack .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 10px rgba(255, 84, 112, 0.9);
+  animation: pulse 1.9s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.btn-attack:hover {
+  background: linear-gradient(180deg, rgba(255, 84, 112, 0.34), rgba(255, 84, 112, 0.18));
+  box-shadow: 0 0 24px rgba(255, 84, 112, 0.22);
+  transform: translateY(-1px);
+}
+
+.btn-attack:disabled { opacity: 0.5; cursor: progress; transform: none; }
+
+.attack-result {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.attack-result.ok { color: var(--green); }
+.attack-result.warn { color: var(--amber); }
+.attack-result.bad { color: var(--red); }
+
 /* ----------------------------------------------------------------- gateway */
 
 .gateway { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }

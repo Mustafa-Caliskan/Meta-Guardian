@@ -125,6 +125,8 @@ class Settings:
     persist_incidents: bool = True
 
     trust_forwarded_for: bool = False
+    demo_attacker_ip: str = "203.0.113.66"
+    attack_cooldown_seconds: float = 10.0
     internal_api_token: str = ""
 
     fixtures_dir: Path = field(default_factory=lambda: FIXTURES_DIR)
@@ -239,6 +241,8 @@ def get_settings() -> Settings:
         baseline_frame=_env("BASELINE_FRAME", ""),
         persist_incidents=_env("PERSIST_INCIDENTS", "1") not in ("0", "false", "False"),
         trust_forwarded_for=_env("TRUST_FORWARDED_FOR", "0") in ("1", "true", "True"),
+        demo_attacker_ip=_env("DEMO_ATTACKER_IP", "203.0.113.66"),
+        attack_cooldown_seconds=_env_float("ATTACK_COOLDOWN_SECONDS", 10.0),
         internal_api_token=_env("INTERNAL_API_TOKEN", ""),
         fixtures_dir=Path(_env("FIXTURES_DIR", str(FIXTURES_DIR))),
         runtime_dir=Path(_env("RUNTIME_DIR", str(RUNTIME_DIR))),

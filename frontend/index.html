@@ -78,6 +78,15 @@
           <span class="hint">demo injector ? synthetic events, real containment</span>
         </header>
         <div class="scenario-list" id="scenarioList"></div>
+        <div class="live-attack">
+          <button class="btn-attack" id="attackBtn" type="button">
+            <span class="dot" aria-hidden="true"></span>
+            FIRE LIVE ATTACK <em>real HTTP ? :8001</em>
+          </button>
+          <p class="attack-result" id="attackResult">
+            Sends a genuine exfiltration request. No probe header: the detection chain must see it.
+          </p>
+        </div>
       </article>
 
       <article class="panel">

@@ -579,6 +579,52 @@
 
   /* ----------------------------------------------------------------- actions */
 
+  async function fireLiveAttack() {
+    const button = $("attackBtn");
+    const result = $("attackResult");
+    if (!button || button.disabled) return;
+
+    button.disabled = true;
+    result.className = "attack-result";
+    result.textContent = "firing real HTTP request at the target service?";
+
+    try {
+      const response = await api("/api/attack", { method: "POST" });
+      const lines = [
+        `HTTP ${response.status} ${response.path}?${response.query} (${Math.round(response.wall_ms)} ms)`,
+      ];
+      if (response.records_returned !== null && response.records_returned !== undefined) {
+        lines.push(`${response.records_returned} records returned ? surface ${response.leak_surface || "?"}`);
+      }
+      if (response.attacker_ip) lines.push(`attacker ip: ${response.attacker_ip}`);
+      if (response.hint) lines.push(response.hint);
+
+      const tone = response.status === 200 ? "ok" : response.blocked_already ? "warn" : "bad";
+      result.className = `attack-result ${tone}`;
+      result.textContent = lines.join(" ? ");
+
+      pushLocalEvent(
+        response.status === 200 ? "critical" : "info",
+        `live attack -> HTTP ${response.status}`
+      );
+
+      // The incident arrives over the WebSocket; refresh in case it lands late.
+      setTimeout(() => {
+        loadIncidents().catch(() => {});
+        loadSnapshot().catch(() => {});
+        loadGateway().catch(() => {});
+      }, 1200);
+    } catch (error) {
+      const message = String(error.message || error);
+      result.className = "attack-result bad";
+      result.textContent = message.includes("rate limited")
+        ? `rate limited: ${message}`
+        : `attack failed: ${message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function runScenario(id) {
     if (state.busy) return;
     state.busy = true;
@@ -725,6 +771,12 @@
         renderEvidence(payload.incident);
         loadIncidents().catch(() => {});
         loadMetrics().catch(() => {});
+      } else if (payload.type === "attack") {
+        const attack = payload.attack || {};
+        pushLocalEvent(
+          attack.status === 200 ? "critical" : "info",
+          `live attack -> HTTP ${attack.status}`
+        );
       } else if (payload.type === "state") {
         state.snapshot = payload.state || state.snapshot;
         renderStats();
@@ -787,5 +839,9 @@
     setInterval(() => { loadMetrics().catch(() => {}); }, 5000);
   }
 
-  document.addEventListener("DOMContentLoaded", boot);
+  document.addEventListener("DOMContentLoaded", () => {
+    const attackButton = $("attackBtn");
+    if (attackButton) attackButton.addEventListener("click", fireLiveAttack);
+    boot();
+  });
 })();
