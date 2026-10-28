@@ -38,10 +38,11 @@ def test_readme_has_a_mermaid_architecture_diagram():
 
 def test_readme_measurement_tables_match_the_recorded_runs():
     text = readme()
-    # live docker measurements
-    assert "236 ms" in text
-    assert "42 ms" in text
-    assert "123 ms" in text
+    # live docker measurements, expressed as observed ranges
+    # values appear inside ranges such as "236–371 ms", so check the numbers
+    for expected in ("236", "371", "42", "93", "115", "123"):
+        assert expected in text, expected
+    assert "ms" in text
     # 1M run
     assert "1,026,768" in text
     assert "7 / 7" in text
@@ -71,3 +72,12 @@ def test_readme_does_not_contain_unmeasured_vendor_claims():
     lowered = readme().lower()
     for forbidden in ("crowdstrike", "wazuh", "detects 99", "100% secure"):
         assert forbidden not in lowered, forbidden
+
+
+def test_readme_is_clean_utf8():
+    raw = README.read_bytes()
+    text = raw.decode("utf-8")  # raises if invalid
+    assert "\ufffd" not in text
+    # the author name and the field reference survived the encoding
+    assert "Mustafa \u00c7al\u0131\u015fkan" in text
+    assert "Sabiha" in text
