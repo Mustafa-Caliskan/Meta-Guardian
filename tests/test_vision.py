@@ -99,7 +99,7 @@ def test_capture_frame_raises_without_any_source(tmp_path: Path):
 
 
 async def test_sam_offline_uses_roi_fallback(tmp_path: Path):
-    bridge = SAMBridge(api_key="")
+    bridge = SAMBridge(api_key="", modal_url="")
     assert bridge.available is False
     frame = add_rect(make_frame(), 40, 30, 50, 60)
 
@@ -115,7 +115,7 @@ async def test_sam_offline_uses_roi_fallback(tmp_path: Path):
 
 
 async def test_sam_offline_uses_baseline_diff(tmp_path: Path):
-    bridge = SAMBridge(api_key="")
+    bridge = SAMBridge(api_key="", modal_url="")
     baseline = make_frame()
     current = add_rect(make_frame(), 25, 15, 40, 30)
 
@@ -148,6 +148,7 @@ async def test_sam_live_parses_boxes_from_responses_api(tmp_path: Path):
         api_key="test-key",
         base_url="https://api.meta.ai/v1",
         model="sam-3.1",
+        modal_url="",
         transport=httpx.MockTransport(handler),
     )
     result = await bridge.segment(
@@ -168,7 +169,7 @@ async def test_sam_live_falls_back_on_http_error():
         return httpx.Response(500, text="boom")
 
     bridge = SAMBridge(
-        api_key="test-key", transport=httpx.MockTransport(handler)
+        api_key="test-key", modal_url="", transport=httpx.MockTransport(handler)
     )
     result = await bridge.segment(make_frame(), roi=[10, 10, 20, 20])
     assert result.fallback_used is True
@@ -180,7 +181,9 @@ async def test_sam_live_falls_back_when_no_boxes():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"output": []})
 
-    bridge = SAMBridge(api_key="test-key", transport=httpx.MockTransport(handler))
+    bridge = SAMBridge(
+        api_key="test-key", modal_url="", transport=httpx.MockTransport(handler)
+    )
     result = await bridge.segment(make_frame(), roi=[3, 4, 5, 6])
     assert result.fallback_used is True
     assert "0 box(es)" in result.detail
@@ -218,3 +221,135 @@ def test_save_and_load_frame_with_unicode_path(tmp_path: Path):
 
     loaded = load_frame(saved)
     assert loaded.shape == (120, 160, 3)
+
+
+async def test_sam_modal_tier_produces_a_real_mask(tmp_path: Path):
+    import json
+
+    mask_png = None
+    from backend.vision.webcam_capture import save_frame
+    import numpy as np
+
+    mask_array = np.zeros((120, 160), dtype=np.uint8)
+    mask_array[30:70, 40:100] = 255
+    mask_png = save_frame(mask_array, tmp_path / "service_mask.png").read_bytes()
+    import base64 as _b64
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        seen["url"] = str(request.url)
+        seen["box"] = body.get("box")
+        seen["token"] = body.get("token")
+        seen["image_prefix"] = body["image_b64"][:10]
+        return httpx.Response(
+            200,
+            json={
+                "boxes": [[40, 30, 60, 40]],
+                "mask_b64": _b64.b64encode(mask_png).decode(),
+                "score": 0.93,
+                "model": "sam-vit_b",
+                "device": "cuda",
+                "latency_ms": 412.5,
+            },
+        )
+
+    bridge = SAMBridge(
+        api_key="",
+        modal_url="https://modal.test/sam",
+        modal_token="mg_test_token",
+        modal_transport=httpx.MockTransport(handler),
+    )
+    assert bridge.available is True
+
+    result = await bridge.segment(
+        add_rect(make_frame(), 40, 30, 60, 40),
+        roi=[40, 30, 60, 40],
+        mask_path=tmp_path / "mask.png",
+    )
+
+    assert result.fallback_used is False
+    assert result.model == "sam-vit_b@modal"
+    assert result.mask_source == "sam-vit_b@modal"
+    assert result.boxes == [[40, 30, 60, 40]]
+    assert seen["url"] == "https://modal.test/sam"
+    assert seen["box"] == [40, 30, 60, 40]
+    assert seen["token"] == "mg_test_token"
+    assert result.mask_path is not None
+    # the persisted mask is the model output, byte for byte
+    assert result.mask_path.read_bytes() == mask_png
+
+
+async def test_sam_prefers_meta_api_over_modal(tmp_path: Path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "modal.test" in str(request.url):
+            return httpx.Response(200, json={"boxes": [[1, 1, 5, 5]], "mask_b64": ""})
+        return httpx.Response(
+            200,
+            json={"output": [{"content": [{"type": "output_text", "text": '{"boxes": [[9, 9, 20, 20]]}'}]}]},
+        )
+
+    bridge = SAMBridge(
+        api_key="meta-key",
+        base_url="https://api.meta.ai/v1",
+        modal_url="https://modal.test/sam",
+        modal_token="mg",
+        transport=httpx.MockTransport(handler),
+        modal_transport=httpx.MockTransport(handler),
+    )
+    result = await bridge.segment(make_frame(), roi=[1, 1, 5, 5])
+
+    assert result.model == "sam-3.1"
+    assert result.boxes == [[9, 9, 20, 20]]
+
+
+async def test_sam_falls_back_to_modal_when_meta_fails():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "modal.test" in str(request.url):
+            return httpx.Response(
+                200,
+                json={"boxes": [[7, 8, 9, 10]], "score": 0.7, "model": "sam-vit_b", "device": "cpu"},
+            )
+        return httpx.Response(500, text="boom")
+
+    bridge = SAMBridge(
+        api_key="meta-key",
+        base_url="https://api.meta.ai/v1",
+        modal_url="https://modal.test/sam",
+        modal_token="mg",
+        transport=httpx.MockTransport(handler),
+        modal_transport=httpx.MockTransport(handler),
+    )
+    result = await bridge.segment(make_frame(), roi=[7, 8, 9, 10])
+
+    assert result.model == "sam-vit_b@modal"
+    assert result.fallback_used is False
+    assert "meta: HTTPStatusError" in result.detail
+
+
+async def test_sam_reports_modal_unauthorized_and_falls_back(tmp_path: Path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"error": "unauthorized"})
+
+    bridge = SAMBridge(
+        api_key="",
+        modal_url="https://modal.test/sam",
+        modal_token="wrong",
+        modal_transport=httpx.MockTransport(handler),
+    )
+    result = await bridge.segment(make_frame(), roi=[2, 2, 10, 10])
+
+    assert result.fallback_used is True
+    assert result.mask_source == "frame-diff"
+    assert "unauthorized" in result.detail
+
+
+async def test_sam_without_any_tier_uses_offline_fallback():
+    bridge = SAMBridge(api_key="", modal_url="")
+    assert bridge.available is False
+
+    result = await bridge.segment(make_frame(), roi=[3, 3, 8, 8])
+
+    assert result.fallback_used is True
+    assert result.model == "diff-fallback"

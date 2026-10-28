@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 
 from .config import get_settings
 from .models import WAFRule
+from .netguard import is_protected_address
 
 settings = get_settings()
 
@@ -198,9 +199,12 @@ async def audit_middleware(request: Request, call_next):
     started = time.perf_counter()
     ip, forwarded_for = resolve_client_ip(request)
     token = request.headers.get("x-session-token")
+    # The patcher replays the attack to prove the fix. That replay is a probe,
+    # not attacker traffic, and must never feed the detector again.
+    probe = request.headers.get("x-mg-probe") == "1"
 
     with STATE.lock:
-        blocked = ip in STATE.blocked_ips
+        blocked = ip in STATE.blocked_ips and not is_protected_address(ip)
 
     if blocked:
         entry = {
@@ -213,6 +217,7 @@ async def audit_middleware(request: Request, call_next):
             "status": 403,
             "session": token,
             "flags": ["blocked_ip"],
+            "probe": probe,
             "latency_ms": 0.0,
             "denied_by": "gateway_blocklist",
         }
@@ -235,6 +240,7 @@ async def audit_middleware(request: Request, call_next):
             "status": response.status_code,
             "session": token,
             "flags": classify_request(request.url.path, request.url.query, token, STATE),
+            "probe": probe,
             "latency_ms": latency_ms,
             "denied_by": None,
         }
@@ -371,14 +377,6 @@ class IPRequest(BaseModel):
     reason: str = ""
 
 
-def is_loopback(ip: str) -> bool:
-    try:
-        address = ipaddress.ip_address(ip)
-    except ValueError:
-        return False
-    return address.is_loopback or address.is_unspecified
-
-
 @app.post("/internal/gateway/block_ip", dependencies=[Depends(require_internal_token)])
 async def block_ip(payload: IPRequest) -> dict[str, Any]:
     try:
@@ -386,11 +384,15 @@ async def block_ip(payload: IPRequest) -> dict[str, Any]:
     except ValueError:
         return JSONResponse(status_code=422, content={"detail": "invalid IP address"})
 
-    if is_loopback(normalized):
-        # Blocking loopback would take down the control plane itself.
+    if is_protected_address(normalized):
         return JSONResponse(
             status_code=422,
-            content={"detail": "refusing to block a loopback/unspecified address"},
+            content={
+                "detail": (
+                    "refusing to block a loopback/private/link-local address: "
+                    "it is infrastructure, not an attacker"
+                )
+            },
         )
 
     with STATE.lock:

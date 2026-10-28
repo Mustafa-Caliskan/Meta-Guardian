@@ -70,6 +70,27 @@ curl -X POST http://127.0.0.1:8000/api/incidents/<id>/patch
 | `MODEL_API_KEY` | soc-cockpit | Meta Model API key for SAM 3.1 |
 | `BASETEN_API_KEY` | soc-cockpit | Spark Open (`meta-models/muse-spark-open-1026`) |
 
+## Segmentation inside the stack
+
+Set `MODAL_SAM_URL` and `MODAL_SAM_TOKEN` in `.env`; compose passes them to
+`soc-cockpit`. The container has no camera, so frames come from the recorded
+scenario images, but the mask is produced by the real Modal model. Verify:
+
+```bash
+docker compose exec soc-cockpit python scripts/test_modal_sam.py --bridge
+```
+
+## Running the benchmark against this stack
+
+The benchmark needs exclusive control of the target. The `soc-cockpit` container
+also runs watchers, so two control planes would race for the same log file:
+
+```bash
+docker compose stop soc-cockpit
+python scripts/benchmark_baseline.py --patch
+docker compose start soc-cockpit
+```
+
 ## Known constraints inside containers
 
 - **No webcam.** `BASELINE_FRAME` points at the synthetic baseline, so presence is

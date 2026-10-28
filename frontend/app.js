@@ -10,6 +10,8 @@
     latest: null,
     events: [],
     gateway: null,
+    metrics: null,
+    chart: null,
     ws: null,
     wsConnected: false,
     retry: 0,
@@ -105,6 +107,146 @@
       button.addEventListener("click", () => runScenario(item.id));
       host.appendChild(button);
     });
+  }
+
+  /* ------------------------------------------------------------- metrics */
+
+  const fmtMs = (value) => {
+    if (value === null || value === undefined) return "?";
+    if (value < 1000) return `${Math.round(value)} ms`;
+    return `${(value / 1000).toFixed(2)} s`;
+  };
+
+  function renderMetrics() {
+    const m = state.metrics;
+    if (!m) return;
+
+    const mttd = m.mttd_ms;
+    const mttr = m.mttr_ms;
+    const patch = m.patch_verify_ms;
+
+    $("mttdValue").textContent = fmtMs(mttd);
+    $("mttdSub").textContent = m.incidents
+      ? `mean over ${m.incidents} incident(s)`
+      : "no incidents yet";
+
+    $("mttrValue").textContent = fmtMs(mttr);
+    $("mttrSub").textContent = m.actions_ok
+      ? `${m.actions_ok} action(s) ok${m.actions_failed ? `, ${m.actions_failed} failed` : ""}`
+      : "no containment yet";
+
+    $("patchValue").textContent = fmtMs(patch);
+    $("patchSub").textContent = m.patched
+      ? `${m.patched} patch(es) verified 200?403`
+      : "no patch yet";
+
+    const tokens = m.full_archive_input_tokens;
+    if (tokens) {
+      $("contextValue").textContent = `${tokens.toLocaleString()} tok`;
+      $("contextSub").textContent = (m.full_archive_model || "model") + " ? docs/FULL_ARCHIVE_RUN.md";
+    } else {
+      $("contextValue").textContent = "not recorded";
+      $("contextSub").textContent = "run scripts/forensics_full_archive.py";
+    }
+
+    updateChart(m);
+  }
+
+  function ensureChart() {
+    if (state.chart) return state.chart;
+    if (typeof window.Chart === "undefined") return null;
+    const canvas = $("trafficChart");
+    if (!canvas) return null;
+
+    const ctx = canvas.getContext("2d");
+    state.chart = new window.Chart(ctx, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: "events",
+            data: [],
+            borderColor: "#39e1ff",
+            backgroundColor: "rgba(57,225,255,0.10)",
+            borderWidth: 1.6,
+            pointRadius: 0,
+            tension: 0.35,
+            fill: true,
+          },
+          {
+            label: "blocked",
+            data: [],
+            borderColor: "#ff5470",
+            backgroundColor: "rgba(255,84,112,0.08)",
+            borderWidth: 1.6,
+            pointRadius: 0,
+            tension: 0.35,
+            fill: true,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            display: true,
+            position: "top",
+            align: "end",
+            labels: {
+              boxWidth: 8,
+              boxHeight: 8,
+              usePointStyle: true,
+              color: "#7f91ab",
+              font: { family: "JetBrains Mono, monospace", size: 9 },
+            },
+          },
+          tooltip: {
+            backgroundColor: "rgba(10,16,27,0.95)",
+            borderColor: "rgba(86,130,190,0.35)",
+            borderWidth: 1,
+            titleFont: { family: "JetBrains Mono, monospace", size: 10 },
+            bodyFont: { family: "JetBrains Mono, monospace", size: 10 },
+          },
+        },
+        scales: {
+          x: { display: false },
+          y: {
+            beginAtZero: true,
+            ticks: {
+              precision: 0,
+              color: "#5d6f88",
+              font: { family: "JetBrains Mono, monospace", size: 8 },
+              maxTicksLimit: 3,
+            },
+            grid: { color: "rgba(86,130,190,0.10)" },
+            border: { display: false },
+          },
+        },
+      },
+    });
+    return state.chart;
+  }
+
+  function updateChart(m) {
+    const chart = ensureChart();
+    if (!chart) return; // Chart.js CDN unavailable: metrics still render
+
+    const events = m.events_per_minute || [];
+    if (!events.length) return;
+
+    chart.data.labels = events.map((_, index) => `${index}`);
+    chart.data.datasets[0].data = events;
+    chart.data.datasets[1].data = m.blocked_per_minute || events.map(() => 0);
+    chart.update("none");
+  }
+
+  async function loadMetrics() {
+    state.metrics = await api("/api/metrics?window_seconds=300");
+    renderMetrics();
   }
 
   function renderGateway() {
@@ -563,9 +705,11 @@
         renderTimeline(payload.incident);
         renderEvidence(payload.incident);
         loadIncidents().catch(() => {});
+        loadMetrics().catch(() => {});
       } else if (payload.type === "state") {
         state.snapshot = payload.state || state.snapshot;
         renderStats();
+        loadMetrics().catch(() => {});
       }
     };
 
@@ -603,6 +747,7 @@
         loadIncidents(),
         loadGateway(),
         loadScenarios(),
+        loadMetrics(),
       ]);
       const latest = state.incidents[0];
       if (latest) {
@@ -620,6 +765,7 @@
     connect();
     setInterval(() => { loadGateway().catch(() => {}); }, 5000);
     setInterval(() => { loadSnapshot().catch(() => {}); }, 8000);
+    setInterval(() => { loadMetrics().catch(() => {}); }, 5000);
   }
 
   document.addEventListener("DOMContentLoaded", boot);

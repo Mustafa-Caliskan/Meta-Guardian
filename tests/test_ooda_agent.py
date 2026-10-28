@@ -7,6 +7,7 @@ from backend.edge.policy_engine import ChangeTicketStore, PolicyEngine
 from backend.llm.mock import MockLLM
 from backend.models import (
     Classification,
+    Severity,
     EventSource,
     EventType,
     IncidentStatus,
@@ -337,3 +338,31 @@ def test_replay_falls_back_to_generic_fixture_for_unknown_scenario():
         "GHOST_ATTACK",
         "BENIGN_AUTHORIZED",
     }
+
+
+async def test_block_ip_drops_when_evidence_only_has_infrastructure_ips():
+    from backend.models import EventSource, EventType, SecurityEvent
+
+    container_ip_event = SecurityEvent(
+        source=EventSource.NETWORK,
+        type=EventType.SUSPICIOUS_API_REQUEST,
+        severity=Severity.CRITICAL,
+        summary="probe from the control plane container",
+        payload={"ip": "172.19.0.3", "path": "/api/v1/ops/data"},
+    )
+    payload = {
+        "classification": "THREAT_CRITICAL",
+        "severity": "critical",
+        "confidence": 0.95,
+        "actions": [{"action": "block_ip_on_gateway", "target": "172.19.0.3"}],
+    }
+    mcp = FakeMCP()
+    store = ChangeTicketStore(tickets=[])
+    agent = OODAAgent(
+        StubLLM(payload), policy=PolicyEngine(store), mcp=mcp, change_tickets=store
+    )
+
+    incident = await agent.run([container_ip_event], vision(True), now=utc_now())
+
+    assert mcp.calls == []
+    assert "never blocked" in incident.decision.reasoning

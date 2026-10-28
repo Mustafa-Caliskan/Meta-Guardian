@@ -60,10 +60,15 @@ async def default_attack(
     timeout: float = 10.0,
 ) -> AttackProbe:
     started = time.perf_counter()
+    request_headers = {"x-mg-probe": "1"}
+    if headers:
+        request_headers.update(headers)
     async with httpx.AsyncClient(
         base_url=base_url, timeout=timeout, transport=transport
     ) as client:
-        response = await client.get(EXFIL_PATH, params=EXFIL_PARAMS, headers=headers)
+        response = await client.get(
+            EXFIL_PATH, params=EXFIL_PARAMS, headers=request_headers
+        )
         return AttackProbe(
             status=response.status_code,
             body=response.text[:400],

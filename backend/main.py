@@ -39,6 +39,7 @@ from .edge.usb_net_watcher import EventBus, NetWatcher, USBWatcher, sha256_file
 from .llm.factory import build_llm
 from .models import (
     ChangeTicket,
+    MetricsReport,
     Classification,
     EventSource,
     EventType,
@@ -121,7 +122,7 @@ class AppState:
         self.incidents: dict[str, Incident] = {}
         self.incident_order: Deque[str] = deque(maxlen=200)
 
-        self.tickets = ChangeTicketStore()
+        self.tickets = ChangeTicketStore(self.settings.change_tickets_path)
         self.policy = PolicyEngine(self.tickets)
         self.mcp = mcp if mcp is not None else MCPServer()
         self.agent = OODAAgent(
@@ -213,7 +214,9 @@ class AppState:
         async with self._pipeline_lock:
             try:
                 incident = Incident(events=list(result.events))
-                vision = await self.gather_evidence(incident.id, mode="live")
+                vision = await self.gather_evidence(
+                    incident.id, mode="live", segment=not self.settings.segmentation_async
+                )
                 incident = await self.agent.run(
                     result.events,
                     vision,
@@ -224,6 +227,8 @@ class AppState:
                 self.real_incidents += 1
                 self._remember(incident)
                 await self.publish_incident(incident)
+                if self.settings.segmentation_async:
+                    await self.enrich_segmentation(incident)
                 return incident
             except Exception as exc:  # noqa: BLE001 - never kill the bus
                 self._log_vision_error("pipeline", result.reason, exc)
@@ -349,13 +354,18 @@ class AppState:
                 await self._emit_event(event)
 
             vision = await self.gather_evidence(
-                incident.id, mode="recorded", recorded_frame=frame_name
+                incident.id,
+                mode="recorded",
+                recorded_frame=frame_name,
+                segment=not self.settings.segmentation_async,
             )
             incident = await self.agent.run(
                 events, vision, now=utc_now(), scenario=scenario, incident=incident
             )
             self._remember(incident)
             await self.publish_incident(incident)
+            if self.settings.segmentation_async:
+                await self.enrich_segmentation(incident)
             return incident
         finally:
             if ticket_added is not None:
@@ -436,6 +446,7 @@ class AppState:
         *,
         mode: str = "live",
         recorded_frame: str | None = None,
+        segment: bool = True,
     ) -> VisionEvidence:
         """Capture one frame, compute presence from pixels, then segment with SAM.
 
@@ -515,6 +526,20 @@ class AppState:
 
         segmentation_roi = roi
         sam_model = self.settings.sam_model
+        if not segment:
+            return VisionEvidence(
+                operator_present=operator_present,
+                confidence=round(confidence, 3),
+                roi=list(roi) if roi else [],
+                description=description[:600],
+                frame_path=str(frame_path) if frame_path.exists() else None,
+                mask_path=None,
+                model=self.settings.sam_model,
+                method=f"{method}->sam-pending",
+                motion_ratio=motion_ratio,
+                frame_source=captured.source,
+                presence_known=presence_known,
+            )
         try:
             segmentation = await self.sam.segment(
                 captured.image,
@@ -545,6 +570,52 @@ class AppState:
             motion_ratio=motion_ratio,
             frame_source=captured.source,
             presence_known=presence_known,
+        )
+
+    async def enrich_segmentation(self, incident: Incident) -> None:
+        """Run the real segmenter after the incident is already visible.
+
+        Perception for the *decision* is the frame diff (fast, local). Pixel
+        segmentation is evidence enrichment: doing it inline would add model
+        latency to MTTD for no decision benefit, and on CPU SAM takes ~20 s.
+        """
+        vision = incident.vision
+        if vision is None or not vision.frame_path:
+            return
+        frame_path = Path(vision.frame_path)
+        if not frame_path.exists():
+            return
+
+        try:
+            image = load_frame(frame_path)
+        except Exception as exc:  # noqa: BLE001
+            self._log_vision_error(incident.id, "segment-load", exc)
+            return
+
+        mask_path = self.evidence_dir(incident.id) / "mask.png"
+        try:
+            result = await self.sam.segment(
+                image,
+                roi=vision.roi or None,
+                baseline=self.presence.baseline,
+                mask_path=mask_path,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._log_vision_error(incident.id, "segment", exc)
+            return
+
+        vision.model = result.model
+        vision.mask_path = str(result.mask_path) if result.mask_path else None
+        vision.method = (
+            f"{vision.method.split('->')[0]}->{result.model}"
+            if vision.method
+            else result.model
+        )
+        vision.description = f"{vision.description[:400]}; SAM: {result.detail}"[:600]
+        incident.touch()
+        self._persist(incident)
+        await self.connections.broadcast(
+            {"type": "incident", "incident": incident.model_dump(mode="json")}
         )
 
     def _log_vision_error(self, incident_id: str, stage: str, exc: Exception) -> None:
@@ -650,6 +721,123 @@ class AppState:
         self._persist(incident)
         await self.publish_incident(incident)
         return incident
+
+    # -- live metrics --------------------------------------------------------
+
+    def metrics(self, window_seconds: int = 300) -> MetricsReport:
+        """Compute MTTD/MTTR and the traffic sparkline from real data."""
+        incidents = [self.incidents[i] for i in self.incident_order if i in self.incidents]
+
+        mttd_samples: list[float] = []
+        mttr_samples: list[float] = []
+        patch_samples: list[float] = []
+
+        for incident in incidents:
+            decision = incident.decision
+            if decision and incident.events:
+                first = min(event.timestamp for event in incident.events)
+                mttd_samples.append(
+                    max(0.0, (decision.created_at - first).total_seconds() * 1000)
+                )
+            results = incident.action_results or []
+            if decision and results:
+                last = max(result.executed_at for result in results)
+                mttr_samples.append(
+                    max(0.0, (last - decision.created_at).total_seconds() * 1000)
+                )
+            if incident.patch:
+                patch_samples.append(float(incident.patch.latency_ms or 0.0))
+
+        actions_ok = sum(
+            1
+            for incident in incidents
+            for result in (incident.action_results or [])
+            if result.success
+        )
+        actions_failed = sum(
+            1
+            for incident in incidents
+            for result in (incident.action_results or [])
+            if not result.success
+        )
+
+        blocked_ips = {
+            result.target
+            for incident in incidents
+            for result in (incident.action_results or [])
+            if result.success and result.action.value == "block_ip_on_gateway"
+        }
+        revoked = {
+            result.target
+            for incident in incidents
+            for result in (incident.action_results or [])
+            if result.success and result.action.value == "revoke_session_token"
+        }
+
+        def mean(values: list[float]) -> float | None:
+            if not values:
+                return None
+            return round(sum(values) / len(values), 2)
+
+        now = utc_now()
+        buckets = 12
+        seconds_per_bucket = max(1, window_seconds // buckets)
+        events_per_bucket = [0] * buckets
+        blocked_per_bucket = [0] * buckets
+
+        for event in self.events:
+            age = (now - event.timestamp).total_seconds()
+            if 0 <= age < window_seconds:
+                index = buckets - 1 - int(age // seconds_per_bucket)
+                events_per_bucket[max(0, min(buckets - 1, index))] += 1
+
+        for incident in incidents:
+            for result in incident.action_results or []:
+                if not result.success or result.action.value != "block_ip_on_gateway":
+                    continue
+                age = (now - result.executed_at).total_seconds()
+                if 0 <= age < window_seconds:
+                    index = buckets - 1 - int(age // seconds_per_bucket)
+                    blocked_per_bucket[max(0, min(buckets - 1, index))] += 1
+
+        tokens, model = self._full_archive_fact()
+
+        return MetricsReport(
+            incidents=len(incidents),
+            contained=sum(
+                1 for incident in incidents if incident.status is IncidentStatus.CONTAINED
+            ),
+            patched=sum(
+                1 for incident in incidents if incident.status is IncidentStatus.PATCHED
+            ),
+            actions_ok=actions_ok,
+            actions_failed=actions_failed,
+            blocked_ips=len(blocked_ips),
+            revoked_sessions=len(revoked),
+            mttd_ms=mean(mttd_samples),
+            mttr_ms=mean(mttr_samples),
+            patch_verify_ms=mean(patch_samples),
+            events_per_minute=events_per_bucket,
+            blocked_per_minute=blocked_per_bucket,
+            window_seconds=window_seconds,
+            full_archive_input_tokens=tokens,
+            full_archive_model=model,
+        )
+
+    @staticmethod
+    def _full_archive_fact() -> tuple[int | None, str | None]:
+        """Read the recorded 1M-context run, if present."""
+        path = PROJECT_ROOT / "data" / "fixtures" / "forensics_full_archive.json"
+        if not path.is_file():
+            return None, None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None, None
+        tokens = data.get("input_tokens_reported")
+        if not isinstance(tokens, int) or tokens <= 0:
+            return None, None
+        return tokens, data.get("model")
 
     # -- forensics / patch ---------------------------------------------------
 
@@ -825,6 +1013,11 @@ def create_app(
     async def dismiss(incident_id: str) -> dict[str, Any]:
         incident = await state.dismiss(incident_id)
         return incident.model_dump(mode="json")
+
+    @app.get("/api/metrics")
+    async def metrics(window_seconds: int = 300) -> dict[str, Any]:
+        report = state.metrics(max(60, min(window_seconds, 3600)))
+        return report.model_dump(mode="json")
 
     @app.get("/api/gateway")
     async def gateway() -> dict[str, Any]:

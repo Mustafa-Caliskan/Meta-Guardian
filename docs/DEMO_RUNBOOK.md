@@ -175,6 +175,22 @@ decide."
 
 ---
 
+## 5b. Optional shots added after day 7
+
+**Live metrics strip (10 s).** Point at the strip above the grid: MTTD, MTTR,
+self-heal, and the `1,026,768 tok` badge. Say the numbers are computed from the
+incidents on screen, not typed in. Hover the badge and mention
+`docs/FULL_ARCHIVE_RUN.md`.
+
+**SAM provenance (10 s).** In the evidence card hover the mask. The method line
+must read `baseline_diff->sam-vit_b@modal` (or `->sam-3.1`). If it reads
+`sam-offline`, the Modal endpoint is not configured and the mask is geometry ?
+do not call it a model output.
+
+**Benchmark (15 s).** `python scripts/benchmark_baseline.py --patch` (stop the
+compose cockpit first, see docs/DOCKER.md). Show the naive engine missing the
+ghost attack and false-alarming on the maintenance window.
+
 ## 6. What not to say
 
 - Do not say `/api/simulate` is real detection. It is a labelled injector.

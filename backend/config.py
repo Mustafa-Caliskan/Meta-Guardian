@@ -92,6 +92,13 @@ class Settings:
     baseten_base_url: str = "https://inference.baseten.co/v1"
     fireworks_api_key: str = ""
     fireworks_base_url: str = "https://api.fireworks.ai/inference/v1"
+    modal_token_id: str = ""
+    modal_token_secret: str = ""
+    modal_proxy_token: str = ""
+    modal_proxy_token_secret: str = ""
+    modal_sam_url: str = ""
+    modal_sam_token: str = ""
+    modal_sam_timeout: float = 120.0
 
     ooda_model: str = GLIMMER_MODEL
     forensics_model: str = META_SPARK_MODEL
@@ -112,6 +119,7 @@ class Settings:
     correlation_window_seconds: float = 30.0
     correlation_cooldown_seconds: float = 10.0
     operator_motion_threshold: float = 0.004
+    segmentation_async: bool = True
     baseline_frame: str = ""
     persist_incidents: bool = True
 
@@ -139,6 +147,13 @@ class Settings:
         if self.host in ("0.0.0.0", "::", ""):
             return "127.0.0.1"
         return self.host
+
+    @property
+    def modal_proxy_auth_header(self) -> str:
+        """Modal Proxy Auth wants ``Bearer <token_id>:<token_secret>``."""
+        if not (self.modal_proxy_token and self.modal_proxy_token_secret):
+            return ""
+        return f"Bearer {self.modal_proxy_token}:{self.modal_proxy_token_secret}"
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -195,6 +210,13 @@ def get_settings() -> Settings:
         baseten_base_url=_env("BASETEN_BASE_URL", "https://inference.baseten.co/v1"),
         fireworks_api_key=_env("FIREWORKS_API_KEY"),
         fireworks_base_url=_env("FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"),
+        modal_token_id=_env("MODAL_TOKEN_ID"),
+        modal_token_secret=_env("MODAL_TOKEN_SECRET"),
+        modal_proxy_token=_env("MODAL_PROXY_TOKEN"),
+        modal_proxy_token_secret=_env_first("MODAL_PROXY_TOKEN_SECRET", "MODAL_PROXY_SECRET"),
+        modal_sam_url=_env("MODAL_SAM_URL"),
+        modal_sam_token=_env_first("MODAL_SAM_TOKEN", "MG_SAM_TOKEN"),
+        modal_sam_timeout=_env_float("MODAL_SAM_TIMEOUT", 120.0),
         ooda_model=_env("OODA_MODEL", GLIMMER_MODEL),
         forensics_model=_env("FORENSICS_MODEL", META_SPARK_MODEL),
         code_model=_env("CODE_MODEL", META_SPARK_MODEL),
@@ -211,6 +233,7 @@ def get_settings() -> Settings:
         correlation_window_seconds=_env_float("CORRELATION_WINDOW_SECONDS", 30.0),
         correlation_cooldown_seconds=_env_float("CORRELATION_COOLDOWN_SECONDS", 10.0),
         operator_motion_threshold=_env_float("OPERATOR_MOTION_THRESHOLD", 0.004),
+        segmentation_async=_env("SEGMENTATION_ASYNC", "1") not in ("0", "false", "False"),
         baseline_frame=_env("BASELINE_FRAME", ""),
         persist_incidents=_env("PERSIST_INCIDENTS", "1") not in ("0", "false", "False"),
         trust_forwarded_for=_env("TRUST_FORWARDED_FOR", "0") in ("1", "true", "True"),

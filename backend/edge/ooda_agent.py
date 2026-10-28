@@ -35,6 +35,7 @@ from ..models import (
     VisionEvidence,
     utc_now,
 )
+from ..netguard import is_protected_address
 from .mcp_server import MCPToolError
 from .policy_engine import ChangeTicketStore, PolicyEngine
 
@@ -340,11 +341,15 @@ class OODAAgent:
                     continue
 
             elif action.action is ActionType.BLOCK_IP_ON_GATEWAY:
-                if action.target not in ips:
-                    if not ips:
-                        dropped.append("block_ip: no source IP in evidence")
+                blockable = [value for value in ips if not is_protected_address(value)]
+                if action.target not in blockable:
+                    if not blockable:
+                        dropped.append(
+                            "block_ip: no blockable source IP in evidence "
+                            "(infrastructure addresses are never blocked)"
+                        )
                         continue
-                    action.target = ips[0]
+                    action.target = blockable[0]
 
             elif action.action is ActionType.REVOKE_SESSION_TOKEN:
                 if action.target not in sessions:

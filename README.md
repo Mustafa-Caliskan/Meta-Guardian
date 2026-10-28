@@ -296,6 +296,33 @@ Replay record: `data/fixtures/forensics_full_archive.json`.
 
 State it on camera as a validation run, not as the per-incident path.
 
+## Segmentation tiers (real SAM, not a drawn rectangle)
+
+`backend/vision/sam_bridge.py` tries three tiers in order and records which one
+produced the mask:
+
+| Tier | Needs | Result |
+|---|---|---|
+| Meta Model API `sam-3.1` | `MODEL_API_KEY` | hosted segmentation |
+| **Modal GPU/CPU Segment Anything** | `MODAL_SAM_URL` + `MODAL_SAM_TOKEN` | open weights, `sam-vit_b` |
+| Offline frame diff | nothing | geometry fallback, labelled as such |
+
+Deploy the Modal service and verify it end to end:
+
+```powershell
+modal secret create meta-guardian-sam MG_SAM_TOKEN=<random>
+$env:MG_SAM_GPU="cpu"          # GPU needs a payment method on the Modal account
+modal deploy scripts/modal_sam.py
+# put the printed URL + token in .env as MODAL_SAM_URL / MODAL_SAM_TOKEN
+python scripts/test_modal_sam.py --bridge
+```
+
+Measured locally: `sam-vit_b` on Modal CPU, box prompt `[228,360,130,40]`,
+returned box `[228,347,119,52]`, score ? 0.80, inference ? 20 s (CPU), cold start
+adds ~10 s. The mask saved by the cockpit is the model output byte for byte.
+Segmentation runs *after* the incident is broadcast (`SEGMENTATION_ASYNC=1`), so
+model latency never inflates MTTD.
+
 ## Docker
 
 ```bash
@@ -305,6 +332,23 @@ docker compose up --build     # target-api :8001 + soc-cockpit :8000
 The physical sensor (webcam, `psutil` USB) stays on the host because a container
 cannot observe host devices. Everything else runs in the stack. Details and
 constraints: [`docs/DOCKER.md`](docs/DOCKER.md).
+
+## Live metrics and baseline benchmark
+
+`GET /api/metrics` computes MTTD, MTTR, patch verification time, action counts,
+a 5-minute traffic sparkline and the 1M-context token count **from real data**.
+The cockpit renders them in the strip above the grid (Chart.js from CDN, no build
+step; if the CDN is unreachable the numbers still render).
+
+```powershell
+python scripts/benchmark_baseline.py --patch
+```
+
+Runs a credible legacy rule engine (static extension/hash deny-list + static IP
+deny-list, no camera, no tickets, no patching) and Meta-Guardian on the same three
+scenarios. Latest result: naive recall 50%, naive false-positive rate 100% on the
+maintenance window; Meta-Guardian 100% / 0%, with the patch verified `200 -> 403`.
+Full table and reasoning: [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
 
 ## Documentation
 

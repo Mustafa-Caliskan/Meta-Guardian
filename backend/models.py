@@ -312,3 +312,24 @@ class KPIReport(BaseModel):
     tokens_saved_pct: float = 0.0
     cloud_calls_per_incident: int = 0
     notes: str = ""
+
+
+class MetricsReport(BaseModel):
+    """Live metrics computed from real incidents, never hard-coded."""
+
+    incidents: int = 0
+    contained: int = 0
+    patched: int = 0
+    actions_ok: int = 0
+    actions_failed: int = 0
+    blocked_ips: int = 0
+    revoked_sessions: int = 0
+    mttd_ms: float | None = None
+    mttr_ms: float | None = None
+    patch_verify_ms: float | None = None
+    events_per_minute: list[int] = Field(default_factory=list)
+    blocked_per_minute: list[int] = Field(default_factory=list)
+    window_seconds: int = 300
+    full_archive_input_tokens: int | None = None
+    full_archive_model: str | None = None
+    generated_at: datetime = Field(default_factory=utc_now)

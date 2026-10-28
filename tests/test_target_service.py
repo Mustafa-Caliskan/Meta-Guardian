@@ -93,8 +93,10 @@ def test_blocked_ip_gets_403(client: TestClient, monkeypatch):
     patched = dataclasses.replace(target_service.settings, trust_forwarded_for=True)
     monkeypatch.setattr(target_service, "settings", patched)
 
-    headers = {"x-forwarded-for": "198.51.100.9"}
-    blocked = client.post("/internal/gateway/block_ip", json={"ip": "198.51.100.9"})
+    # 203.0.113.0/24 is a documentation range: blockable on purpose, so the demo
+    # attacker address is never mistaken for infrastructure.
+    headers = {"x-forwarded-for": "203.0.113.9"}
+    blocked = client.post("/internal/gateway/block_ip", json={"ip": "203.0.113.9"})
     assert blocked.status_code == 200
     assert blocked.json()["blocked"] is True
 
@@ -107,6 +109,19 @@ def test_loopback_cannot_be_blocked(client: TestClient):
     response = client.post("/internal/gateway/block_ip", json={"ip": "127.0.0.1"})
     assert response.status_code == 422
     assert "loopback" in response.json()["detail"]
+
+
+def test_private_infrastructure_cannot_be_blocked(client: TestClient):
+    # Docker bridge, RFC1918 and link-local addresses are infrastructure.
+    for address in ("172.19.0.1", "10.0.0.5", "192.168.1.10", "169.254.1.1"):
+        response = client.post("/internal/gateway/block_ip", json={"ip": address})
+        assert response.status_code == 422, address
+
+
+def test_documentation_ranges_remain_blockable(client: TestClient):
+    for address in ("203.0.113.66", "198.51.100.7", "192.0.2.5"):
+        response = client.post("/internal/gateway/block_ip", json={"ip": address})
+        assert response.status_code == 200, address
 
 
 def test_invalid_ip_cannot_be_blocked(client: TestClient):
@@ -148,3 +163,26 @@ def test_rule_fingerprint_is_stable(client: TestClient):
 
 def test_target_service_module_exposes_app():
     assert target_service.app.title == "Aviation Ops API"
+
+
+def test_probe_header_is_recorded_and_does_not_change_status(client: TestClient):
+    response = client.get(
+        "/api/v1/ops/data",
+        params={"aircraft": "ALL", "limit": 99999},
+        headers={"x-mg-probe": "1"},
+    )
+    assert response.status_code == 200
+
+    import json
+
+    entry = json.loads(STATE.log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert entry["probe"] is True
+    assert "exfil_marker:aircraft=all" in entry["flags"]
+
+
+def test_non_probe_requests_are_marked_false(client: TestClient):
+    client.get("/api/v1/ops/flights")
+    import json
+
+    entry = json.loads(STATE.log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert entry["probe"] is False

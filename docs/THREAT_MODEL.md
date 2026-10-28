@@ -130,6 +130,8 @@ benchmark produced it.
 | Model claims GHOST_ATTACK without verified presence | Prompt rule + deterministic downgrade to `THREAT_CRITICAL` with human approval | `backend/edge/ooda_agent.py`, `backend/edge/policy_engine.py` |
 | Replay returns the scenario-A verdict for B and C | Scenario-scoped fixture keys (`ooda:A/B/C`) with generic fallback | `backend/edge/ooda_agent.py`, `backend/llm/replay.py` |
 | Network/image mount treated as a USB insertion | Removable-only filter on filesystem and mount options | `backend/edge/usb_net_watcher.py` |
+| Blocklist can lock out the control plane | Loopback, link-local, RFC1918 and ULA addresses are never blockable | `backend/netguard.py` |
+| Patcher replay re-triggers the detector | Probes carry `x-mg-probe` and are excluded from detection | `backend/target_service.py`, `backend/cloud/patcher.py` |
 
 ## 6. What the demo must not claim
 

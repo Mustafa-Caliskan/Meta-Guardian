@@ -116,6 +116,15 @@ async def test_block_ip_calls_gateway(server: MCPServer):
     assert payload["ip"] == "203.0.113.66"
 
 
+async def test_block_ip_refuses_private_infrastructure(server: MCPServer):
+    for address in ("172.19.0.1", "10.0.0.5", "192.168.0.7"):
+        result = await server.call_tool(
+            ActionType.BLOCK_IP_ON_GATEWAY.value, {"ip": address}
+        )
+        assert result.success is False, address
+        assert "infrastructure" in result.detail
+
+
 async def test_block_ip_refuses_loopback(server: MCPServer):
     result = await server.call_tool(
         ActionType.BLOCK_IP_ON_GATEWAY.value, {"ip": "127.0.0.1"}

@@ -1,12 +1,15 @@
-"""Meta Model API ``sam-3.1`` segmentation bridge with an offline fallback.
+"""Three-tier Segment Anything bridge.
 
-Live mode sends a single image plus a text prompt (optionally with a bbox hint)
-to the Meta Model API Responses endpoint and parses boxes/masks defensively,
-because provider response envelopes evolve.
+Order of preference, first working tier wins:
 
-Offline mode (no ``MODEL_API_KEY``) never touches the network: it reuses the
-frame-diff mask from :mod:`roi_detector`, which is exactly the crop used for the
-demo. That keeps the pipeline real, deterministic and testable.
+1. **Meta Model API ``sam-3.1``** (hosted) ? needs ``MODEL_API_KEY``.
+2. **Modal GPU Segment Anything** (open weights, ``scripts/modal_sam.py``) ?
+   needs ``MODAL_SAM_URL`` plus the Modal proxy token pair.
+3. **Offline frame-diff mask** ? no network, always available.
+
+The offline tier reuses :mod:`roi_detector`, so the demo stays deterministic when
+there is no key, no GPU and no internet. Every result records which tier actually
+produced the mask, so the cockpit never overstates what happened.
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ class SegmentationResult:
     fallback_used: bool = False
     latency_ms: float = 0.0
     detail: str = ""
+    mask_source: str = ""
 
     @property
     def primary_box(self) -> list[int] | None:
@@ -144,6 +148,12 @@ class SAMBridge:
         model: str | None = None,
         timeout: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        modal_url: str | None = None,
+        modal_token: str | None = None,
+        modal_auth: str | None = None,
+        modal_timeout: float | None = None,
+        modal_transport: httpx.AsyncBaseTransport | None = None,
+        prefer: str = "auto",
     ) -> None:
         settings = get_settings()
         self.api_key = settings.meta_api_key if api_key is None else api_key
@@ -152,9 +162,29 @@ class SAMBridge:
         self.timeout = timeout if timeout is not None else settings.request_timeout
         self.transport = transport
 
+        self.modal_url = (
+            settings.modal_sam_url if modal_url is None else modal_url
+        ).rstrip("/")
+        self.modal_token = (
+            settings.modal_sam_token if modal_token is None else modal_token
+        )
+        self.modal_auth = (
+            settings.modal_proxy_auth_header if modal_auth is None else modal_auth
+        )
+        self.modal_timeout = (
+            settings.modal_sam_timeout if modal_timeout is None else modal_timeout
+        )
+        self.modal_transport = modal_transport
+        self.prefer = prefer
+
     @property
     def available(self) -> bool:
-        return bool(self.api_key)
+        """True when at least one networked tier is configured."""
+        return bool(self.api_key or self.modal_available)
+
+    @property
+    def modal_available(self) -> bool:
+        return bool(self.modal_url)
 
     async def segment(
         self,
@@ -166,24 +196,58 @@ class SAMBridge:
         mask_path: Path | str | None = None,
     ) -> SegmentationResult:
         started = time.perf_counter()
-        if self.available:
-            try:
-                boxes, detail = await self._call_api(image, prompt, roi)
-                if boxes:
-                    result = SegmentationResult(
-                        boxes=boxes,
-                        model=self.model,
-                        prompt=prompt,
-                        detail=detail,
-                    )
-                    result.latency_ms = round((time.perf_counter() - started) * 1000, 2)
-                    result.mask_path = self._write_mask(mask_path, image, roi=boxes[0])
-                    return result
-                failure = detail or "SAM API returned no boxes"
-            except Exception as exc:  # noqa: BLE001 - fall back on any provider error
-                failure = f"{type(exc).__name__}: {exc}"
-        else:
-            failure = "MODEL_API_KEY not configured"
+        failures: list[str] = []
+        remote_boxes: list[list[int]] = []
+        remote_model = ""
+        remote_mask: str | None = None
+
+        tiers = ["meta", "modal"]
+        if self.prefer in ("meta", "modal"):
+            tiers = [self.prefer] + [t for t in tiers if t != self.prefer]
+
+        for tier in tiers:
+            if tier == "meta":
+                if not self.api_key:
+                    failures.append("meta: MODEL_API_KEY not configured")
+                    continue
+                try:
+                    boxes, detail, mask_b64 = await self._call_api(image, prompt, roi)
+                    if boxes:
+                        remote_boxes, remote_model, remote_mask = boxes, self.model, mask_b64
+                        failures.append(f"meta: ok ({detail})")
+                        break
+                    failures.append(f"meta: {detail}")
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(f"meta: {type(exc).__name__}: {exc}")
+            else:
+                if not self.modal_url:
+                    failures.append("modal: MODAL_SAM_URL not configured")
+                    continue
+                try:
+                    boxes, detail, mask_b64 = await self._call_modal(image, roi)
+                    if boxes:
+                        remote_boxes, remote_model, remote_mask = boxes, "sam-vit_b@modal", mask_b64
+                        failures.append(f"modal: ok ({detail})")
+                        break
+                    failures.append(f"modal: {detail}")
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(f"modal: {type(exc).__name__}: {exc}")
+
+        if remote_boxes:
+            result = SegmentationResult(
+                boxes=remote_boxes,
+                model=remote_model,
+                prompt=prompt,
+                detail="; ".join(failures),
+                mask_source=remote_model,
+            )
+            result.latency_ms = round((time.perf_counter() - started) * 1000, 2)
+            result.mask_path = self._persist_remote_mask(mask_path, image, remote_mask, remote_boxes[0])
+            return result
+
+        failure = "; ".join(failures) or "no segmentation tier configured"
+        if self.prefer == "meta" and not self.api_key:
+            failure = "MODEL_API_KEY not configured; " + failure
 
         result = self._fallback(
             image, prompt=prompt, roi=roi, baseline=baseline, detail=failure
@@ -194,9 +258,47 @@ class SAMBridge:
         )
         return result
 
+    async def _call_modal(
+        self, image: np.ndarray, roi: list[int] | None
+    ) -> tuple[list[list[int]], str, str | None]:
+        """Segment on the Modal GPU service (scripts/modal_sam.py)."""
+        body: dict[str, Any] = {"image_b64": self._image_b64(image)}
+        if roi:
+            body["box"] = [int(value) for value in roi[:4]]
+        if self.modal_token:
+            # Sent in the body because Modal's fastapi_endpoint exposes only the
+            # JSON payload to the handler. HTTPS protects it in transit.
+            body["token"] = self.modal_token
+        headers = {"Content-Type": "application/json"}
+        if self.modal_token:
+            headers["X-MG-SAM-Token"] = self.modal_token
+        if self.modal_auth:
+            headers["Authorization"] = self.modal_auth
+
+        async with httpx.AsyncClient(
+            timeout=self.modal_timeout, transport=self.modal_transport
+        ) as client:
+            response = await client.post(self.modal_url, headers=headers, json=body)
+            response.raise_for_status()
+            data = response.json()
+
+        if not isinstance(data, dict):
+            raise ValueError(f"unexpected Modal response: {data!r}")
+        if data.get("error"):
+            raise ValueError(f"Modal service error: {data['error']}")
+
+        boxes = extract_boxes(data)
+        mask_b64 = data.get("mask_b64")
+        detail = (
+            f"HTTP {response.status_code}, {len(boxes)} box(es), "
+            f"score={data.get('score')}, device={data.get('device')}, "
+            f"gpu_ms={data.get('latency_ms')}"
+        )
+        return boxes, detail, mask_b64 if isinstance(mask_b64, str) else None
+
     async def _call_api(
         self, image: np.ndarray, prompt: str, roi: list[int] | None
-    ) -> tuple[list[list[int]], str]:
+    ) -> tuple[list[list[int]], str, str | None]:
         text = prompt
         if roi:
             x, y, w, h = roi
@@ -228,7 +330,7 @@ class SAMBridge:
             data = response.json()
 
         boxes = extract_boxes(data)
-        return boxes, f"HTTP {response.status_code}, {len(boxes)} box(es)"
+        return boxes, f"HTTP {response.status_code}, {len(boxes)} box(es)", None
 
     def _fallback(
         self,
@@ -253,6 +355,7 @@ class SAMBridge:
             prompt=prompt,
             fallback_used=True,
             detail=f"{reason} ({detail})",
+            mask_source="frame-diff",
         )
 
     @staticmethod
@@ -264,6 +367,35 @@ class SAMBridge:
             raise ValueError("could not encode frame as JPEG")
         encoded = base64.b64encode(buffer.tobytes()).decode("ascii")
         return f"data:image/jpeg;base64,{encoded}"
+
+    @staticmethod
+    def _image_b64(image: np.ndarray) -> str:
+        return SAMBridge._data_uri(image).split(",", 1)[1]
+
+    @staticmethod
+    def _persist_remote_mask(
+        mask_path: Path | str | None,
+        image: np.ndarray,
+        mask_b64: str | None,
+        fallback_box: list[int] | None,
+    ) -> Path | None:
+        """Save the mask the remote model actually produced.
+
+        A real mask from SAM must never be replaced by a drawn rectangle. Only if
+        the provider returned no mask do we fall back to the ROI geometry, and the
+        result records which happened via ``mask_source``.
+        """
+        if mask_path is None:
+            return None
+        path = Path(mask_path)
+        if mask_b64:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(base64.b64decode(mask_b64))
+                return path
+            except Exception:  # noqa: BLE001 - fall through to geometry
+                pass
+        return SAMBridge._write_mask(path, image, roi=fallback_box)
 
     @staticmethod
     def _write_mask(

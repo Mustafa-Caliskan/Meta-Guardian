@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from ..config import get_settings
+from ..netguard import is_protected_address
 from ..models import (
     ActionType,
     ChangeTicket,
@@ -397,7 +398,7 @@ class PolicyEngine:
         for event in events:
             payload = event.payload or {}
             ip = payload.get("ip")
-            if ip and ip not in ("-", "unknown"):
+            if ip and ip not in ("-", "unknown") and not is_protected_address(ip):
                 actions.append(
                     MCPAction(
                         action=ActionType.BLOCK_IP_ON_GATEWAY,

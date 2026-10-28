@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Meta-Guardian — Cyber-Physical SOC</title>
   <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 </head>
 <body>
   <div class="scanline" aria-hidden="true"></div>
@@ -39,6 +40,33 @@
     <div class="stat"><span class="k">contained</span><strong id="statContained">0</strong></div>
     <div class="stat"><span class="k">pending approval</span><strong id="statPending">0</strong></div>
     <div class="stat wide"><span class="k">uptime</span><strong id="statUptime">00:00:00</strong></div>
+  </section>
+
+  <section class="metrics" aria-label="Live measured metrics">
+    <div class="metric">
+      <span class="m-k">MTTD <em>edge detect</em></span>
+      <strong id="mttdValue">?</strong>
+      <span class="m-sub" id="mttdSub">no incidents yet</span>
+    </div>
+    <div class="metric">
+      <span class="m-k">MTTR <em>containment</em></span>
+      <strong id="mttrValue">?</strong>
+      <span class="m-sub" id="mttrSub">no incidents yet</span>
+    </div>
+    <div class="metric">
+      <span class="m-k">Self-heal <em>patch + verify</em></span>
+      <strong id="patchValue">?</strong>
+      <span class="m-sub" id="patchSub">no patch yet</span>
+    </div>
+    <div class="metric metric-context" id="contextMetric" title="See docs/FULL_ARCHIVE_RUN.md">
+      <span class="m-k">1M context <em>validated run</em></span>
+      <strong id="contextValue">?</strong>
+      <span class="m-sub" id="contextSub" title="docs/FULL_ARCHIVE_RUN.md">hover for the full-archive proof</span>
+    </div>
+    <div class="metric metric-chart">
+      <span class="m-k">Traffic ? last 5 min <em>events vs blocked</em></span>
+      <canvas id="trafficChart" height="56" aria-label="Event and block rate sparkline"></canvas>
+    </div>
   </section>
 
   <main class="grid">

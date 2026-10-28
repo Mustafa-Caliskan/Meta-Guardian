@@ -243,3 +243,37 @@ def test_wait_for_event_helper():
         assert event.type is EventType.SUSPICIOUS_API_REQUEST
 
     asyncio.run(scenario())
+
+
+def test_net_watcher_ignores_verification_probes(tmp_path: Path):
+    log = tmp_path / "requests.jsonl"
+    _write_log(
+        log,
+        [
+            {
+                "seq": 1,
+                "ip": "172.19.0.3",
+                "method": "GET",
+                "path": "/api/v1/ops/data",
+                "query": "aircraft=ALL&limit=99999",
+                "status": 200,
+                "flags": ["exfil_marker:aircraft=all"],
+                "probe": True,
+            },
+            {
+                "seq": 2,
+                "ip": "203.0.113.66",
+                "method": "GET",
+                "path": "/api/v1/ops/data",
+                "query": "aircraft=ALL&limit=99999",
+                "status": 200,
+                "flags": ["exfil_marker:aircraft=all"],
+                "probe": False,
+            },
+        ],
+    )
+    watcher = NetWatcher(EventBus(), log, ignore_history=False)
+    events = watcher.poll_once()
+
+    assert len(events) == 1
+    assert events[0].payload["ip"] == "203.0.113.66"

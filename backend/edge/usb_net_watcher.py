@@ -315,6 +315,9 @@ class NetWatcher:
         path = str(entry.get("path", ""))
         if path.startswith(("/internal", "/health")):
             return False
+        if entry.get("probe"):
+            # Verification replays issued by the patcher are not attack traffic.
+            return False
         flags = entry.get("flags") or []
         return any(str(flag).startswith(self.EMIT_FLAGS) for flag in flags)
 

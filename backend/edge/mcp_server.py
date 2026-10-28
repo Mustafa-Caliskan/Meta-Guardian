@@ -29,6 +29,7 @@ import psutil
 
 from ..config import get_settings
 from ..models import ActionType, MCPActionResult
+from ..netguard import is_protected_address
 from .usb_net_watcher import sha256_file
 
 PROTECTED_PIDS = {0, 1, 4}
@@ -232,11 +233,12 @@ class MCPServer:
         except ValueError:
             return self._failure(action, str(ip), "invalid IP address")
 
-        if ipaddress.ip_address(normalized).is_loopback or ipaddress.ip_address(
-            normalized
-        ).is_unspecified:
+        if is_protected_address(normalized):
             return self._failure(
-                action, normalized, "refusing to block loopback/unspecified address"
+                action,
+                normalized,
+                "refusing to block a loopback/private/link-local address "
+                "(infrastructure, not an attacker)",
             )
 
         try:
