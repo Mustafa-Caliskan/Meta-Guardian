@@ -2,10 +2,10 @@
 
 Order of preference, first working tier wins:
 
-1. **Meta Model API ``sam-3.1``** (hosted) ? needs ``MODEL_API_KEY``.
+1. **Meta Model API ``sam-3.1``** (hosted) — needs ``MODEL_API_KEY``.
 2. **Modal GPU Segment Anything** (open weights, ``scripts/modal_sam.py``) ?
    needs ``MODAL_SAM_URL`` plus the Modal proxy token pair.
-3. **Offline frame-diff mask** ? no network, always available.
+3. **Offline frame-diff mask** — no network, always available.
 
 The offline tier reuses :mod:`roi_detector`, so the demo stays deterministic when
 there is no key, no GPU and no internet. Every result records which tier actually

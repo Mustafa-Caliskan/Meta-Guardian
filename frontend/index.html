@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Meta-Guardian — Cyber-Physical SOC</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=4" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 </head>
 <body>
@@ -31,6 +31,9 @@
       <span class="badge" id="modelSpark">spark-1.3</span>
       <span class="badge" id="modelOpen">spark-open</span>
       <span class="badge conn" id="connBadge" data-state="off">● offline</span>
+      <button class="badge badge-btn" id="archBtn" type="button" title="Show the detection and containment flow">
+        ⌘ architecture
+      </button>
     </div>
   </header>
 
@@ -64,8 +67,8 @@
       <span class="m-sub" id="contextSub" title="docs/FULL_ARCHIVE_RUN.md">hover for the full-archive proof</span>
     </div>
     <div class="metric metric-chart">
-      <span class="m-k">Traffic ? last 5 min <em>events vs blocked</em></span>
-      <canvas id="trafficChart" height="56" aria-label="Event and block rate sparkline"></canvas>
+      <span class="m-k">Traffic — last 5 min <em>events vs blocked</em></span>
+      <div style="height: 42px; max-height: 42px; position: relative; width: 100%; overflow: hidden;"><canvas id="trafficChart" aria-label="Event and block rate sparkline"></canvas></div>
     </div>
   </section>
 
@@ -75,13 +78,13 @@
       <article class="panel">
         <header class="panel-head">
           <h2>Scenario injector</h2>
-          <span class="hint">demo injector ? synthetic events, real containment</span>
+          <span class="hint">demo injector — synthetic events, real containment</span>
         </header>
         <div class="scenario-list" id="scenarioList"></div>
         <div class="live-attack">
           <button class="btn-attack" id="attackBtn" type="button">
             <span class="dot" aria-hidden="true"></span>
-            FIRE LIVE ATTACK <em>real HTTP ? :8001</em>
+            FIRE LIVE ATTACK <em>real HTTP → :8001</em>
           </button>
           <p class="attack-result" id="attackResult">
             Sends a genuine exfiltration request. No probe header: the detection chain must see it.
@@ -160,6 +163,103 @@
     <span>edge frame-diff + SAM 3.1 · MCP quarantine · deterministic policy gate</span>
   </footer>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=4"></script>
+  <div class="alert-banner" id="alertBanner" role="status" aria-live="polite" hidden>
+    <span class="ab-dot" aria-hidden="true"></span>
+    <span class="ab-text" id="alertBannerText"></span>
+    <button class="ab-close" id="alertBannerClose" type="button" aria-label="Dismiss">×</button>
+  </div>
+
+  <div class="arch-modal" id="archModal" role="dialog" aria-modal="true" aria-labelledby="archTitle" hidden>
+    <div class="arch-backdrop" id="archBackdrop"></div>
+    <div class="arch-panel" role="document">
+      <header class="arch-head">
+        <h2 id="archTitle">Detection → containment, end to end</h2>
+        <button class="arch-close" id="archClose" type="button" aria-label="Close">×</button>
+      </header>
+
+      <div class="arch-flow">
+        <section class="arch-tier">
+          <h3>1 · Edge sensors</h3>
+          <div class="arch-box">
+            <strong>USBWatcher</strong>
+            <span>psutil removable media, removable-only filter</span>
+          </div>
+          <div class="arch-box">
+            <strong>NetWatcher</strong>
+            <span>tails the target audit log, keeps the request timestamp</span>
+          </div>
+          <div class="arch-box">
+            <strong>Webcam + PresenceDetector</strong>
+            <span>one frame per event, motion vs calibrated baseline</span>
+          </div>
+        </section>
+
+        <div class="arch-arrow" aria-hidden="true">→</div>
+
+        <section class="arch-tier">
+          <h3>2 · Control plane</h3>
+          <div class="arch-box">
+            <strong>Correlator</strong>
+            <span>30 s window, dedupe, per-signature cooldown</span>
+          </div>
+          <div class="arch-box">
+            <strong>OODA agent</strong>
+            <span>Observe / Orient / Decide / Act, JSON validated</span>
+          </div>
+          <div class="arch-box">
+            <strong>PolicyEngine</strong>
+            <span>change tickets, confidence bands, rate limit</span>
+          </div>
+          <div class="arch-box accent">
+            <strong>MCP tools</strong>
+            <span>quarantine, block IP, revoke session, kill process</span>
+          </div>
+        </section>
+
+        <div class="arch-arrow" aria-hidden="true">→</div>
+
+        <section class="arch-tier">
+          <h3>3 · Model tiers</h3>
+          <div class="arch-box">
+            <strong>SAM</strong>
+            <span>Meta sam-3.1 → Modal sam-vit_b → frame diff</span>
+          </div>
+          <div class="arch-box">
+            <strong>Muse Spark Open</strong>
+            <span>decision (Baseten), open weights</span>
+          </div>
+          <div class="arch-box">
+            <strong>1M-context forensics</strong>
+            <span>archive scan, every citation line-verified</span>
+          </div>
+        </section>
+
+        <div class="arch-arrow" aria-hidden="true">→</div>
+
+        <section class="arch-tier">
+          <h3>4 · Protected service</h3>
+          <div class="arch-box">
+            <strong>Aviation Ops API</strong>
+            <span>vulnerable by design, :8001</span>
+          </div>
+          <div class="arch-box">
+            <strong>Gateway state</strong>
+            <span>blocklist, revoked sessions, WAF rule</span>
+          </div>
+          <div class="arch-box accent">
+            <strong>Patcher</strong>
+            <span>apply rule, replay attack, prove 200 → 403, rollback</span>
+          </div>
+        </section>
+      </div>
+
+      <footer class="arch-foot">
+        <span>No model executes code.</span>
+        <span>No camera frame reaches the LLM.</span>
+        <span>Every claim is re-verifiable from the case file.</span>
+      </footer>
+    </div>
+  </div>
 </body>
 </html>

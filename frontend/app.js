@@ -21,6 +21,148 @@
 
   const MAX_LOG_ROWS = 180;
 
+
+  /* ------------------------------------------------------- alert banner */
+
+  let bannerTimer = null;
+
+  function showBanner(tone, message, autoHideMs) {
+    const banner = $("alertBanner");
+    const text = $("alertBannerText");
+    if (!banner || !text) return;
+
+    if (bannerTimer) {
+      clearTimeout(bannerTimer);
+      bannerTimer = null;
+    }
+
+    banner.classList.remove("is-contained");
+    if (tone === "contained") banner.classList.add("is-contained");
+
+    text.textContent = message;
+    banner.hidden = false;
+    // Next frame so the transform transition actually runs.
+    requestAnimationFrame(() => banner.classList.add("is-visible"));
+
+    if (autoHideMs) {
+      bannerTimer = setTimeout(() => hideBanner(), autoHideMs);
+    }
+  }
+
+  function hideBanner() {
+    const banner = $("alertBanner");
+    if (!banner) return;
+    banner.classList.remove("is-visible");
+    if (bannerTimer) {
+      clearTimeout(bannerTimer);
+      bannerTimer = null;
+    }
+    setTimeout(() => {
+      if (!banner.classList.contains("is-visible")) banner.hidden = true;
+    }, 300);
+  }
+
+  function bannerForIncident(incident) {
+    if (!incident) return;
+    const decision = incident.decision || {};
+    const policy = incident.policy || {};
+    const status = incident.status;
+    const classification = decision.classification || "unknown";
+    const id = String(incident.id || "").slice(-6);
+
+    if (status === "patched") {
+      showBanner(
+        "contained",
+        `THREAT CONTAINED · SELF-HEALED · ${classification} · ${id} · HTTP 200 → 403`,
+        8000
+      );
+      return;
+    }
+
+    if (status === "contained") {
+      const actions = (incident.action_results || []).length;
+      showBanner(
+        "contained",
+        `THREAT CONTAINED · ${classification} · ${id} · ${actions} action(s) executed`,
+        8000
+      );
+      return;
+    }
+
+    if (status === "dismissed") {
+      showBanner(
+        "contained",
+        `AUTHORIZED ACTIVITY · ${classification} · ${id} · no action taken`,
+        6000
+      );
+      return;
+    }
+
+    if (status === "open" && policy.mode === "approval") {
+      showBanner(
+        "critical",
+        `AWAITING HUMAN APPROVAL · ${classification} · ${id} · confidence ${(decision.confidence ?? 0).toFixed(2)}`,
+        0
+      );
+      return;
+    }
+
+    if (status === "open") {
+      showBanner(
+        "critical",
+        `CRITICAL THREAT · ${classification} · ${id} · containment incomplete`,
+        0
+      );
+      return;
+    }
+
+    if (classification === "THREAT_CRITICAL" || classification === "GHOST_ATTACK") {
+      showBanner(
+        "critical",
+        `CRITICAL THREAT DETECTED · ${classification} · ${id} · containment engaged`,
+        6000
+      );
+    }
+  }
+
+  /* --------------------------------------------------- architecture modal */
+
+  function openArch() {
+    const modal = $("archModal");
+    if (!modal) return;
+    modal.hidden = false;
+    const close = $("archClose");
+    if (close) close.focus();
+  }
+
+  function closeArch() {
+    const modal = $("archModal");
+    if (!modal) return;
+    modal.hidden = true;
+  }
+
+  function wireOverlays() {
+    const archButton = $("archBtn");
+    const archClose = $("archClose");
+    const backdrop = $("archBackdrop");
+    const bannerClose = $("alertBannerClose");
+
+    if (archButton) archButton.addEventListener("click", openArch);
+    if (archClose) archClose.addEventListener("click", closeArch);
+    if (backdrop) backdrop.addEventListener("click", closeArch);
+    if (bannerClose) bannerClose.addEventListener("click", hideBanner);
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      const modal = $("archModal");
+      if (modal && !modal.hidden) {
+        closeArch();
+        return;
+      }
+      hideBanner();
+    });
+  }
+
   /* ------------------------------------------------------------------ utils */
 
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
@@ -137,13 +279,13 @@
 
     $("patchValue").textContent = fmtMs(patch);
     $("patchSub").textContent = m.patched
-      ? `${m.patched} patch(es) verified 200?403`
+      ? `${m.patched} patch(es) verified 200→403`
       : "no patch yet";
 
     const tokens = m.full_archive_input_tokens;
     if (tokens) {
       $("contextValue").textContent = `${tokens.toLocaleString()} tok`;
-      $("contextSub").textContent = (m.full_archive_model || "model") + " ? docs/FULL_ARCHIVE_RUN.md";
+      $("contextSub").textContent = (m.full_archive_model || "model") + " — docs/FULL_ARCHIVE_RUN.md";
     } else {
       $("contextValue").textContent = "not recorded";
       $("contextSub").textContent = "run scripts/forensics_full_archive.py";
@@ -503,7 +645,7 @@
     if (forensics) {
       steps.push({
         kind: "pol",
-        head: `Cloud forensics ? ${esc(forensics.model || "model")}`,
+        head: `Cloud forensics — ${esc(forensics.model || "model")}`,
         body: `${esc((forensics.summary || "").slice(0, 240))}`,
         meta: `<span class="pill ${forensics.citations_verified ? "ok" : "bad"}">${(forensics.citations || []).length} citation(s) ${forensics.citations_verified ? "verified" : "unverified"}</span>
                <span class="pill">${forensics.archive_lines_scanned || 0} lines</span>
@@ -594,19 +736,27 @@
         `HTTP ${response.status} ${response.path}?${response.query} (${Math.round(response.wall_ms)} ms)`,
       ];
       if (response.records_returned !== null && response.records_returned !== undefined) {
-        lines.push(`${response.records_returned} records returned ? surface ${response.leak_surface || "?"}`);
+        lines.push(`${response.records_returned} records returned — surface ${response.leak_surface || "?"}`);
       }
       if (response.attacker_ip) lines.push(`attacker ip: ${response.attacker_ip}`);
       if (response.hint) lines.push(response.hint);
 
       const tone = response.status === 200 ? "ok" : response.blocked_already ? "warn" : "bad";
       result.className = `attack-result ${tone}`;
-      result.textContent = lines.join(" ? ");
+      result.textContent = lines.join(" — ");
 
       pushLocalEvent(
         response.status === 200 ? "critical" : "info",
         `live attack -> HTTP ${response.status}`
       );
+
+      if (response.status === 200) {
+        showBanner(
+          "critical",
+          "CRITICAL THREAT DETECTED \u00b7 attacker request accepted (HTTP 200) \u00b7 containment engaged",
+          6000
+        );
+      }
 
       // The incident arrives over the WebSocket; refresh in case it lands late.
       setTimeout(() => {
@@ -638,6 +788,7 @@
       await Promise.all([loadEvents(), loadIncidents(), loadSnapshot(), loadGateway()]);
       renderTimeline(incident);
       renderEvidence(incident);
+      bannerForIncident(incident);
     } catch (error) {
       pushLocalEvent("error", `scenario ${id} failed: ${error.message}`);
     } finally {
@@ -769,6 +920,7 @@
         state.latest = payload.incident;
         renderTimeline(payload.incident);
         renderEvidence(payload.incident);
+        bannerForIncident(payload.incident);
         loadIncidents().catch(() => {});
         loadMetrics().catch(() => {});
       } else if (payload.type === "attack") {
@@ -842,6 +994,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     const attackButton = $("attackBtn");
     if (attackButton) attackButton.addEventListener("click", fireLiveAttack);
+    wireOverlays();
     boot();
   });
 })();
