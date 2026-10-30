@@ -514,9 +514,14 @@ class AppState:
                 method="unavailable",
                 presence_known=False,
                 frame_source="none",
+                tampered=False,
             )
 
         presence_known = True
+        camera_tampered = False
+        tamper_reason = ""
+        frame_mean = 0.0
+        frame_stddev = 0.0
         try:
             presence = self.presence.detect(captured.image)
             operator_present = presence.present
@@ -524,8 +529,12 @@ class AppState:
             motion_ratio = presence.motion_ratio
             roi = presence.roi
             description = presence.description
-            method = "baseline_diff"
+            method = presence.method
             presence_known = presence.reliable
+            camera_tampered = presence.tampered
+            tamper_reason = presence.tamper_reason
+            frame_mean = presence.frame_mean
+            frame_stddev = presence.frame_stddev
         except Exception as exc:  # noqa: BLE001 - no baseline means unknown
             self._log_vision_error(incident_id, "presence", exc)
             presence_known = False
@@ -554,6 +563,10 @@ class AppState:
                 motion_ratio=motion_ratio,
                 frame_source=captured.source,
                 presence_known=presence_known,
+                tampered=camera_tampered,
+                tamper_reason=tamper_reason,
+                frame_mean=frame_mean,
+                frame_stddev=frame_stddev,
             )
         try:
             segmentation = await self.sam.segment(
@@ -585,6 +598,10 @@ class AppState:
             motion_ratio=motion_ratio,
             frame_source=captured.source,
             presence_known=presence_known,
+            tampered=camera_tampered,
+            tamper_reason=tamper_reason,
+            frame_mean=frame_mean,
+            frame_stddev=frame_stddev,
         )
 
     def _schedule_segmentation(self, incident: Incident) -> None:

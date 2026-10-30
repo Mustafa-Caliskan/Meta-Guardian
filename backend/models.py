@@ -94,6 +94,10 @@ class VisionEvidence(BaseModel):
     motion_ratio: float = 0.0
     frame_source: str = ""
     presence_known: bool = True
+    tampered: bool = False
+    tamper_reason: str = ""
+    frame_mean: float = 0.0
+    frame_stddev: float = 0.0
 
 
 class ChangeTicket(BaseModel):

@@ -251,6 +251,27 @@ class PolicyEngine:
         has_admin = any(event.type is EventType.ADMIN_COMMAND for event in events)
         ticket = self.tickets.find_covering(moment)
         identity = self._session_identity(events)
+        camera_tampered = bool(vision and vision.tampered)
+
+        if camera_tampered and has_admin:
+            # Fail closed: someone blinded the sensor while a privileged command
+            # ran. Presence cannot be established, so no automatic action and no
+            # silent suppression: a human must look at this.
+            return PolicyOutcome(
+                classification=Classification.THREAT_CRITICAL,
+                severity=Severity.CRITICAL,
+                confidence=max(0.9, proposed.confidence),
+                mode=PolicyMode.APPROVAL,
+                reason=(
+                    "camera tampered during a privileged command: fail-closed, "
+                    f"human approval required ({vision.tamper_reason})"
+                ),
+                operator_present=False,
+                ticket_owner_match=None,
+                evaluated_at=moment,
+                pending_actions=self._candidate_actions(proposed, events)
+                or self.default_containment(events),
+            )
 
         # A change ticket only suppresses an alert when it belongs to the identity
         # that actually ran the action. Anyone able to open a ticket must not be

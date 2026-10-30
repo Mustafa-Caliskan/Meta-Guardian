@@ -143,9 +143,12 @@
     }
 
     if (status === "open" && policy.mode === "approval") {
+      const tampered = incident.vision && incident.vision.tampered;
       showBanner(
         "critical",
-        `AWAITING HUMAN APPROVAL · ${classification} · ${id} · confidence ${(decision.confidence ?? 0).toFixed(2)}`,
+        tampered
+          ? `CAMERA TAMPERED · FAIL-CLOSED · ${classification} · ${id} · awaiting human approval`
+          : `AWAITING HUMAN APPROVAL · ${classification} · ${id} · confidence ${(decision.confidence ?? 0).toFixed(2)}`,
         0
       );
       return;
@@ -533,6 +536,9 @@
           <span class="pill">conf ${(decision.confidence ?? 0).toFixed(2)}</span>
           <span class="pill ${policy.mode === "approval" ? "warn" : policy.mode === "monitor" ? "" : "ok"}">${esc(policy.mode || "—")}</span>
           <span class="pill">${(incident.action_results || []).length} action(s)</span>
+          ${incident.vision && incident.vision.tampered ? '<span class="pill warn">CAMERA TAMPERED</span>' : ""}
+          ${incident.forensics ? `<span class="pill ${incident.forensics.citations_verified ? "ok" : "warn"}">forensics ${incident.forensics.citations_verified ? "verified" : "unverified"}</span>` : ""}
+          ${incident.patch ? `<span class="pill ${incident.patch.verified ? "ok" : "bad"}">patch ${incident.patch.verified ? "200 → 403" : "failed"}</span>` : ""}
         </div>
         <p class="muted">${esc((decision.reasoning || "").slice(0, 190))}</p>
         <div class="i-actions"></div>`;
@@ -625,10 +631,18 @@
     mask.onerror = () => { mask.hidden = true; maskPlaceholder.hidden = false; maskPlaceholder.textContent = "mask unavailable"; };
 
     const present = vision.operator_present;
-    pill.className = `pill ${present ? "ok" : "bad"}`;
-    pill.textContent = present ? "operator present" : "no operator";
+    if (vision.tampered) {
+      pill.className = "pill warn";
+      pill.textContent = "camera tampered";
+    } else {
+      pill.className = `pill ${present ? "ok" : "bad"}`;
+      pill.textContent = present ? "operator present" : "no operator";
+    }
 
-    note.textContent = `${vision.model || "sam-3.1"} · confidence ${(vision.confidence ?? 0).toFixed(2)} · ROI [${(vision.roi || []).join(", ")}] · ${vision.description || ""}`;
+    const tamperNote = vision.tampered
+      ? ` · CAMERA TAMPERED (${vision.tamper_reason || "unknown"}) · fail-closed`
+      : "";
+    note.textContent = `${vision.model || "sam-3.1"} · confidence ${(vision.confidence ?? 0).toFixed(2)} · ROI [${(vision.roi || []).join(", ")}]${tamperNote} · ${vision.description || ""}`;
   }
 
   function actionLine(result) {

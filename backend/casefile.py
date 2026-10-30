@@ -191,6 +191,10 @@ def build_casefile(incident: Incident) -> dict[str, Any]:
                 "frame_file": _basename(vision.frame_path),
                 "mask_file": _basename(vision.mask_path),
                 "frame_source": vision.frame_source,
+                "tampered": vision.tampered,
+                "tamper_reason": vision.tamper_reason,
+                "frame_mean": vision.frame_mean,
+                "frame_stddev": vision.frame_stddev,
             }
             if vision
             else None
@@ -346,6 +350,8 @@ def render_markdown(casefile: dict[str, Any]) -> str:
             f"| Frame source | {_cell(vision['frame_source'])} |",
             f"| Frame file | {_cell(vision['frame_file'])} |",
             f"| Mask file | {_cell(vision['mask_file'])} |",
+            f"| Camera tampered | {_cell(_bool(vision.get('tampered')))} |",
+            f"| Tamper reason | {_cell(vision.get('tamper_reason') or 'n/a')} |",
             "",
             f"> {vision['description']}",
             "",

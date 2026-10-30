@@ -211,6 +211,12 @@ self-heal, and the `1,026,768 tok` badge. Say the numbers are computed from the
 incidents on screen, not typed in. Hover the badge and mention
 `docs/FULL_ARCHIVE_RUN.md`.
 
+**Camera tamper (10 s, optional).** Cover the lens with your hand while a
+privileged command runs (`python scripts/trigger_attack.py --admin --watch`).
+Expect an amber `CAMERA TAMPERED` badge, the banner `CAMERA TAMPERED ? FAIL-CLOSED`,
+policy mode `approval`, and zero executed actions. Say: "blinding the sensor does
+not hide the attack, it just moves the decision to a human."
+
 **SAM provenance (10 s).** In the evidence card hover the mask. The method line
 must read `baseline_diff->sam-vit_b@modal` (or `->sam-3.1`). If it reads
 `sam-offline`, the Modal endpoint is not configured and the mask is geometry ?

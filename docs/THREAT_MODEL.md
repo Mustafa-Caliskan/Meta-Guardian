@@ -135,6 +135,7 @@ benchmark produced it.
 | Public detection bypass via a fixed marker | The marker is authenticated with `INTERNAL_API_TOKEN` (constant-time compare); a public value would be a documented evasion | `backend/target_service.py` |
 | MTTD understated by the log poll interval | Event timestamps come from the request's own `ts` field, not from the tailer read time | `backend/edge/usb_net_watcher.py` |
 | Slow segmentation freezing the cockpit | Segmentation is scheduled after publish, outside the bundle lock | `backend/main.py` |
+| Camera tampering (covered lens) read as "empty seat" | Flat/dark/blown-out frames are reported as `tampered`, never as presence, and a privileged command during tampering fails closed to human approval | `backend/vision/operator.py`, `backend/edge/policy_engine.py` |
 
 ## 6. What the demo must not claim
 
