@@ -64,8 +64,16 @@ class GatewayState:
     revoked_sessions: set[str] = field(default_factory=set)
     sessions: dict[str, dict[str, str]] = field(
         default_factory=lambda: {
-            "session-ops-valid": {"operator": "ops-engineer", "role": "operator"},
-            "session-7f3a9c": {"operator": "ops-admin", "role": "admin"},
+            "session-ops-valid": {
+                "operator": "ops-engineer",
+                "role": "operator",
+                "origin_ip": "10.0.0.21",
+            },
+            "session-7f3a9c": {
+                "operator": "ops-admin",
+                "role": "admin",
+                "origin_ip": "10.0.0.31",
+            },
         }
     )
     rule: WAFRule | None = None
@@ -80,8 +88,16 @@ class GatewayState:
             self.blocked_ips.clear()
             self.revoked_sessions.clear()
             self.sessions = {
-                "session-ops-valid": {"operator": "ops-engineer", "role": "operator"},
-                "session-7f3a9c": {"operator": "ops-admin", "role": "admin"},
+                "session-ops-valid": {
+                    "operator": "ops-engineer",
+                    "role": "operator",
+                    "origin_ip": "10.0.0.21",
+                },
+                "session-7f3a9c": {
+                    "operator": "ops-admin",
+                    "role": "admin",
+                    "origin_ip": "10.0.0.31",
+                },
             }
             self.rule = None
             self.revision = 0
@@ -203,6 +219,32 @@ def is_verification_probe(supplied: str | None) -> bool:
     return hmac.compare_digest(supplied, expected)
 
 
+def session_audit_fields(token: str | None) -> dict[str, Any]:
+    """Identity attached to every audit line.
+
+    The OODA agent can only correlate a change ticket with a session if the log
+    says who the session belonged to and where it came from. Without these three
+    fields the policy gate has nothing to compare against.
+    """
+    empty = {
+        "session_owner": None,
+        "session_role": None,
+        "session_origin_ip": None,
+    }
+    if not token:
+        return empty
+    with STATE.lock:
+        record = STATE.sessions.get(token)
+        revoked = token in STATE.revoked_sessions
+    if record is None:
+        return {**empty, "session_revoked": revoked}
+    return {
+        "session_owner": record.get("operator"),
+        "session_role": record.get("role"),
+        "session_origin_ip": record.get("origin_ip"),
+    }
+
+
 @app.middleware("http")
 async def audit_middleware(request: Request, call_next):
     started = time.perf_counter()
@@ -235,6 +277,7 @@ async def audit_middleware(request: Request, call_next):
             "probe": probe,
             "latency_ms": 0.0,
             "denied_by": "gateway_blocklist",
+            **session_audit_fields(token),
         }
         STATE.record(entry)
         return JSONResponse(
@@ -258,6 +301,7 @@ async def audit_middleware(request: Request, call_next):
             "probe": probe,
             "latency_ms": latency_ms,
             "denied_by": None,
+            **session_audit_fields(token),
         }
     )
     return response

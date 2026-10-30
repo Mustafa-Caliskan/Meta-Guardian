@@ -23,7 +23,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 from ..config import get_settings
 from ..netguard import is_protected_address
@@ -189,14 +189,78 @@ class PolicyEngine:
         vision: VisionEvidence | None = None,
         now: datetime | None = None,
     ) -> PolicyOutcome:
+        """Evaluate a proposal and annotate the verdict with ticket provenance.
+
+        A covering ticket that does not belong to the identity behind the event is
+        not merely ignored: the verdict records the mismatch and why, so the case
+        file can show that suppression was refused on purpose.
+        """
+        outcome = self._evaluate(
+            events=events, proposed=proposed, vision=vision, now=now
+        )
+
+        ticket = self.tickets.find_covering(_ensure_tz(now))
+        identity = self._session_identity(events)
+        matched, note = self._ticket_match(ticket, identity)
+
+        if outcome.ticket_owner_match is None:
+            outcome.ticket_owner_match = matched
+        if note and outcome.classification is not Classification.BENIGN_AUTHORIZED:
+            outcome.reason = f"{outcome.reason} | ticket not honoured: {note}"
+        return outcome
+
+    def _ticket_match(
+        self, ticket: Any, identity: dict[str, Any]
+    ) -> tuple[bool | None, str]:
+        """Does this ticket belong to the identity that ran the action?"""
+        if ticket is None:
+            return None, ""
+        owner = identity.get("owner")
+        role = identity.get("role")
+        if owner is None:
+            return (
+                False,
+                f"ticket {ticket.ticket_id} cannot be matched: the audit log "
+                "records no session owner for this request",
+            )
+        if owner != ticket.operator:
+            return (
+                False,
+                f"ticket {ticket.ticket_id} belongs to {ticket.operator}, "
+                f"event ran as {owner}",
+            )
+        if role != "admin":
+            return (
+                False,
+                f"ticket {ticket.ticket_id} matched operator {owner} but the "
+                f"session role is {role!r}, not 'admin'",
+            )
+        return True, ""
+
+    def _evaluate(
+        self,
+        *,
+        events: list[SecurityEvent],
+        proposed: OODADecision,
+        vision: VisionEvidence | None = None,
+        now: datetime | None = None,
+    ) -> PolicyOutcome:
         moment = _ensure_tz(now)
         presence_known = bool(vision and vision.presence_known)
         operator_present = bool(vision and vision.operator_present)
         has_admin = any(event.type is EventType.ADMIN_COMMAND for event in events)
         ticket = self.tickets.find_covering(moment)
+        identity = self._session_identity(events)
 
-        if ticket is not None and operator_present:
-            return self._authorized(proposed, ticket, operator_present, moment)
+        # A change ticket only suppresses an alert when it belongs to the identity
+        # that actually ran the action. Anyone able to open a ticket must not be
+        # able to whitelist somebody else's privileged command.
+        ticket_owner_match, _ = self._ticket_match(ticket, identity)
+
+        if ticket is not None and operator_present and ticket_owner_match:
+            return self._authorized(
+                proposed, ticket, operator_present, moment, identity
+            )
 
         if has_admin and presence_known and not operator_present:
             return self._ghost(proposed, events, operator_present, moment)
@@ -302,24 +366,69 @@ class PolicyEngine:
 
     # -- rules ---------------------------------------------------------------
 
+    @staticmethod
+    @staticmethod
+    def _session_identity(events: list[SecurityEvent]) -> dict[str, Any]:
+        """Pull the session owner/role/origin recorded by the target service.
+
+        The audit line is the only place that knows which identity ran a request.
+        Without it a change ticket cannot be tied to the action it supposedly
+        authorises. Empty strings are normalised to ``None`` so a request with no
+        session is treated as unknown, not as an identity called "".
+        """
+        identity: dict[str, Any] = {
+            "session": None,
+            "owner": None,
+            "role": None,
+            "origin_ip": None,
+        }
+
+        def clean(value: Any) -> str | None:
+            if value is None:
+                return None
+            text = str(value).strip()
+            return text or None
+
+        for event in events:
+            payload = event.payload or {}
+            owner = clean(payload.get("session_owner"))
+            role = clean(payload.get("session_role"))
+            origin = clean(payload.get("session_origin_ip"))
+            if owner or role or origin:
+                identity.update(
+                    {
+                        "session": clean(payload.get("session")),
+                        "owner": owner,
+                        "role": role,
+                        "origin_ip": origin,
+                    }
+                )
+        return identity
+
+
     def _authorized(
         self,
         proposed: OODADecision,
         ticket: ChangeTicket,
         operator_present: bool,
         moment: datetime,
+        identity: dict[str, Any] | None = None,
     ) -> PolicyOutcome:
+        origin = (identity or {}).get("origin_ip")
+        origin_note = f" from {origin}" if origin else ""
         return PolicyOutcome(
             classification=Classification.BENIGN_AUTHORIZED,
             severity=Severity.LOW,
             confidence=max(proposed.confidence, 0.95),
             mode=PolicyMode.MONITOR,
             reason=(
-                f"change ticket {ticket.ticket_id} by {ticket.operator} covers "
-                f"{moment.isoformat()} and an operator is present"
+                f"change ticket {ticket.ticket_id} belongs to {ticket.operator}, "
+                f"the session ran as that operator{origin_note}, and an operator "
+                f"is present at {moment.isoformat()}"
             ),
             ticket_id=ticket.ticket_id,
             operator_present=operator_present,
+            ticket_owner_match=True,
             evaluated_at=moment,
         )
 

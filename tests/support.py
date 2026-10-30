@@ -54,7 +54,11 @@ def usb_event(mountpoint: str = "/media/usb", payload_name: str = "payload.ps1")
 
 
 def network_event(
-    ip: str = "203.0.113.66", session: str = "session-7f3a9c"
+    ip: str = "203.0.113.66",
+    session: str = "session-7f3a9c",
+    session_owner: str = "ops-admin",
+    session_role: str = "admin",
+    session_origin_ip: str = "10.0.0.31",
 ) -> SecurityEvent:
     return SecurityEvent(
         source=EventSource.NETWORK,
@@ -64,6 +68,9 @@ def network_event(
         payload={
             "ip": ip,
             "session": session,
+            "session_owner": session_owner,
+            "session_role": session_role,
+            "session_origin_ip": session_origin_ip,
             "method": "GET",
             "path": "/api/v1/ops/data",
             "status": 200,
@@ -71,13 +78,27 @@ def network_event(
     )
 
 
-def admin_event(ip: str = "203.0.113.66", session: str = "session-7f3a9c") -> SecurityEvent:
+def admin_event(
+    ip: str = "203.0.113.66",
+    session: str = "session-7f3a9c",
+    session_owner: str = "ops-admin",
+    session_role: str = "admin",
+    session_origin_ip: str = "10.0.0.31",
+) -> SecurityEvent:
     return SecurityEvent(
         source=EventSource.NETWORK,
         type=EventType.ADMIN_COMMAND,
         severity=Severity.HIGH,
         summary=f"POST /api/v1/admin/command from {ip}",
-        payload={"ip": ip, "session": session, "method": "POST", "status": 200},
+        payload={
+            "ip": ip,
+            "session": session,
+            "session_owner": session_owner,
+            "session_role": session_role,
+            "session_origin_ip": session_origin_ip,
+            "method": "POST",
+            "status": 200,
+        },
     )
 
 
@@ -90,7 +111,7 @@ def vision(present: bool = True, confidence: float = 0.92) -> VisionEvidence:
     )
 
 
-def covering_ticket(operator: str = "mustafa", ticket_id: str = "CHG-2026-77") -> ChangeTicket:
+def covering_ticket(operator: str = "ops-admin", ticket_id: str = "CHG-2026-77") -> ChangeTicket:
     now = utc_now()
     return ChangeTicket(
         ticket_id=ticket_id,

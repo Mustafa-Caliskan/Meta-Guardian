@@ -426,6 +426,9 @@ class AppState:
             payload={
                 "ip": "203.0.113.66",
                 "session": "session-7f3a9c",
+                "session_owner": "ops-admin",
+                "session_role": "admin",
+                "session_origin_ip": "10.0.0.31",
                 "method": "GET",
                 "path": "/api/v1/ops/data",
                 "query": "aircraft=ALL&limit=99999",
@@ -443,6 +446,9 @@ class AppState:
             payload={
                 "ip": "203.0.113.66",
                 "session": "session-7f3a9c",
+                "session_owner": "ops-admin",
+                "session_role": "admin",
+                "session_origin_ip": "10.0.0.31",
                 "method": "POST",
                 "path": "/api/v1/admin/command",
                 "status": 200,
@@ -656,7 +662,9 @@ class AppState:
         now = utc_now()
         ticket = ChangeTicket(
             ticket_id=f"CHG-SIM-{now.strftime('%H%M%S')}",
-            operator="mustafa",
+            # Must match the identity the simulated session runs as, otherwise
+            # the ticket legitimately fails the ownership check.
+            operator="ops-admin",
             reason="approved maintenance window (simulated)",
             window_start=now - timedelta(minutes=10),
             window_end=now + timedelta(minutes=10),
