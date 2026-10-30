@@ -38,6 +38,15 @@ from backend.config import get_settings  # noqa: E402
 EXFIL_PATH = "/api/v1/ops/data"
 EXFIL_PARAMS = {"aircraft": "ALL", "limit": 99999}
 
+settings = get_settings()
+
+
+def _cockpit_headers(settings) -> dict[str, str]:
+    """Bearer header for the control plane when MG_COCKPIT_TOKEN is configured."""
+    if getattr(settings, "cockpit_auth_enabled", False):
+        return {"Authorization": f"Bearer {settings.cockpit_token}"}
+    return {}
+
 
 def _client(base_url: str, timeout: float = 15.0) -> httpx.Client:
     return httpx.Client(base_url=base_url, timeout=timeout)
@@ -100,7 +109,9 @@ def wait_for_incident(
     while time.time() < deadline:
         try:
             with _client(control_url, timeout=5) as client:
-                body = client.get("/api/incidents").json()
+                body = client.get(
+                    "/api/incidents", headers=_cockpit_headers(settings)
+                ).json()
                 for incident in body.get("incidents", []):
                     if incident["id"] not in known_ids:
                         return incident
@@ -113,7 +124,9 @@ def wait_for_incident(
 def current_incident_ids(control_url: str) -> set[str]:
     try:
         with _client(control_url, timeout=5) as client:
-            body = client.get("/api/incidents").json()
+            body = client.get(
+                "/api/incidents", headers=_cockpit_headers(settings)
+            ).json()
             return {incident["id"] for incident in body.get("incidents", [])}
     except httpx.HTTPError as exc:
         print(f"[control] cannot reach {control_url}: {exc}")
@@ -123,7 +136,10 @@ def current_incident_ids(control_url: str) -> set[str]:
 def patch_incident(control_url: str, incident_id: str) -> dict | None:
     try:
         with _client(control_url, timeout=180) as client:
-            response = client.post(f"/api/incidents/{incident_id}/patch")
+            response = client.post(
+                f"/api/incidents/{incident_id}/patch",
+                headers=_cockpit_headers(settings),
+            )
             response.raise_for_status()
             return response.json()
     except httpx.HTTPError as exc:
@@ -172,7 +188,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=45.0, help="watch timeout seconds")
     args = parser.parse_args(argv)
 
-    settings = get_settings()
     target = (args.target or settings.target_base_url).rstrip("/")
     control = (args.control or f"http://{settings.host}:{settings.port}").rstrip("/")
 

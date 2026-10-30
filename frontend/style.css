@@ -910,3 +910,50 @@ body::before {
   .arch-flow { grid-template-columns: 1fr; }
   .arch-modal { padding: 10px; }
 }
+
+/* ---------------------------------------------------------------- token bar */
+
+.token-bar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 22px;
+  border-bottom: 1px solid rgba(255, 189, 74, 0.4);
+  background: linear-gradient(180deg, rgba(44, 34, 10, 0.9), rgba(26, 20, 6, 0.85));
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: #ffe1a8;
+}
+
+.token-bar[hidden] { display: none; }
+
+.token-bar .tb-label { letter-spacing: 0.12em; text-transform: uppercase; }
+
+.token-bar .tb-hint { color: var(--muted); }
+.token-bar code {
+  font-family: var(--mono);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.token-bar input {
+  flex: 1 1 220px;
+  min-width: 180px;
+  max-width: 380px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 189, 74, 0.4);
+  background: rgba(6, 10, 16, 0.8);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.token-bar input:focus {
+  outline: none;
+  border-color: rgba(255, 189, 74, 0.8);
+}

@@ -32,6 +32,8 @@ BASETEN_API_KEY=<Baseten key> # Spark Open: meta-models/muse-spark-open-1026
 
 TRUST_FORWARDED_FOR=1         # lets the attacker IP look realistic behind loopback
 INTERNAL_API_TOKEN=dev-token  # protects /internal/* on the target
+MG_COCKPIT_TOKEN=dev-cockpit  # protects the cockpit API; the browser will prompt
+MG_COCKPIT_OPERATOR=mustafa   # recorded as the approver on human decisions
 
 BASELINE_FRAME=data/runtime/baseline.png
 OPERATOR_MOTION_THRESHOLD=0.004
@@ -41,8 +43,13 @@ Why `TRUST_FORWARDED_FOR=1` matters: without it the TCP peer is `127.0.0.1`,
 loopback blocking is refused by design, and the incident stays `open` with
 `block_ip ... FAIL`. That is correct behaviour but looks like a bug on video.
 
-Why `INTERNAL_API_TOKEN` matters: it proves the control plane is not open. The
-target and the control center both read it from `.env`.
+Why `INTERNAL_API_TOKEN` matters: it protects the target's `/internal/*` routes.
+
+Why `MG_COCKPIT_TOKEN` matters: without it the cockpit API ? including
+`POST /api/attack` ? is open to anything that can reach port 8000. With it, open
+`http://127.0.0.1:8000/?token=dev-cockpit` once; the token is stored locally and
+stripped from the URL. `scripts/trigger_attack.py` reads the same variable, so no
+script change is needed.
 
 ---
 

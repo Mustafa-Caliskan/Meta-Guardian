@@ -37,6 +37,14 @@
     </div>
   </header>
 
+  <div class="token-bar" id="tokenBar" hidden>
+    <span class="tb-label">cockpit token required</span>
+    <input id="tokenInput" type="password" placeholder="MG_COCKPIT_TOKEN"
+           autocomplete="off" spellcheck="false" aria-label="Cockpit token" />
+    <button class="btn" id="tokenApply" type="button">authenticate</button>
+    <span class="tb-hint">or open this page with <code>?token=…</code> once</span>
+  </div>
+
   <section class="stats" aria-label="Live counters">
     <div class="stat"><span class="k">events</span><strong id="statEvents">0</strong></div>
     <div class="stat"><span class="k">incidents</span><strong id="statIncidents">0</strong></div>

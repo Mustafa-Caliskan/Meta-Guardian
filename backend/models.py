@@ -142,6 +142,14 @@ class PolicyOutcome(BaseModel):
     rate_limited_actions: list[MCPAction] = Field(default_factory=list)
     evaluated_at: datetime = Field(default_factory=utc_now)
 
+    # Accountability: who decided, when. Populated only by a human action.
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    rejected_by: str | None = None
+    rejected_at: datetime | None = None
+    rejection_reason: str = ""
+    ticket_owner_match: bool | None = None
+
 
 class MCPActionResult(BaseModel):
     action: ActionType
@@ -284,6 +292,10 @@ class Incident(BaseModel):
     action_results: list[MCPActionResult] = Field(default_factory=list)
     forensics: ForensicsReport | None = None
     patch: PatchResult | None = None
+
+    decided_by: str | None = None
+    decided_at: datetime | None = None
+    decision_note: str = ""
 
     def touch(self) -> "Incident":
         self.updated_at = utc_now()

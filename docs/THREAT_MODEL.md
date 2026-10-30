@@ -144,3 +144,34 @@ benchmark produced it.
 - That a vendor agent (Wazuh/CrowdStrike) cannot do parts of this. The novelty is
   the combined physical + network correlation with a deterministic action gate
   and verifiable self-patching, not any single component.
+
+## 7. Control-plane authentication and human accountability
+
+The cockpit (port 8000) can trigger real containment, so it is a privileged
+surface. Two modes:
+
+| Mode | When | Behaviour |
+|---|---|---|
+| `disabled` | `MG_COCKPIT_TOKEN` empty (**local demo default**) | Every `/api/*` except `/api/health` and `/api/config` is open. `/api/config` reports `"cockpit_auth": "disabled"` so the exposure is never hidden. |
+| `enabled` | `MG_COCKPIT_TOKEN` set | All `/api/*` require `Authorization: Bearer <token>`; a wrong or missing token gets `401`. `/api/health` and `/api/config` stay open so the browser can discover that a token is needed. The WebSocket requires `?token=`. |
+
+`/api/config` deliberately carries no operator identity and no incident data; it
+only advertises whether auth is on.
+
+### Accepted trade-off
+
+The WebSocket token travels as a query parameter, which means it can appear in
+reverse-proxy access logs. This is accepted for the demo and documented instead
+of hidden. For a production deployment the token should move to the
+`Sec-WebSocket-Protocol` header.
+
+### Human decisions are recorded
+
+`approve`, `reject` and `dismiss` store `operator` and a UTC timestamp on the
+incident (`decided_by`, `decided_at`) and on the policy outcome
+(`approved_by`/`approved_at`, `rejected_by`/`rejected_at`, `rejection_reason`).
+The case file renders a **Human decision** section, or states explicitly that no
+human was involved when the deterministic gate acted alone.
+
+`reject` executes nothing: it clears the pending actions, marks the incident
+`dismissed`, and records the reason.

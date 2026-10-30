@@ -14,6 +14,7 @@ No Streamlit, no build step: plain FastAPI + vanilla JS.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import shutil
 import time
@@ -24,7 +25,7 @@ from pathlib import Path
 from typing import Any, Deque
 
 import httpx
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -98,6 +99,10 @@ class ConnectionManager:
 
 class SimulateRequest(BaseModel):
     scenario: str = Field(default="A", pattern="^[ABC]$")
+
+
+class RejectRequest(BaseModel):
+    reason: str = Field(default="", max_length=500)
 
 
 class AppState:
@@ -695,7 +700,7 @@ class AppState:
 
     # -- approvals -----------------------------------------------------------
 
-    async def approve(self, incident_id: str) -> Incident:
+    async def approve(self, incident_id: str, operator: str) -> Incident:
         incident = self.incidents.get(incident_id)
         if incident is None:
             raise HTTPException(status_code=404, detail="incident not found")
@@ -715,12 +720,17 @@ class AppState:
         for action in approved:
             results.append(await self.agent.execute(action))
 
+        now = utc_now()
         incident.action_results.extend(results)
         incident.policy.approved_actions.extend(approved)
         incident.policy.rate_limited_actions.extend(limited)
         incident.policy.pending_actions = []
         incident.policy.mode = PolicyMode.AUTO
-        incident.policy.reason += " | approved by human operator"
+        incident.policy.approved_by = operator
+        incident.policy.approved_at = now
+        incident.decided_by = operator
+        incident.decided_at = now
+        incident.decision_note = f"approved {len(approved)} action(s) by {operator}"
         success = bool(results) and all(result.success for result in results)
         incident.status = IncidentStatus.CONTAINED if success else IncidentStatus.OPEN
         incident.touch()
@@ -729,11 +739,40 @@ class AppState:
         await self.publish_incident(incident)
         return incident
 
-    async def dismiss(self, incident_id: str) -> Incident:
+    async def reject(self, incident_id: str, operator: str, reason: str = "") -> Incident:
+        """Record a human refusal. No containment action is executed."""
         incident = self.incidents.get(incident_id)
         if incident is None:
             raise HTTPException(status_code=404, detail="incident not found")
+        if incident.policy is None:
+            raise HTTPException(status_code=409, detail="incident has no policy verdict")
+        if incident.policy.mode is not PolicyMode.APPROVAL:
+            raise HTTPException(status_code=409, detail="incident has no pending approval")
+
+        now = utc_now()
+        incident.policy.rejected_by = operator
+        incident.policy.rejected_at = now
+        incident.policy.rejection_reason = reason
+        incident.policy.pending_actions = []
         incident.status = IncidentStatus.DISMISSED
+        incident.decided_by = operator
+        incident.decided_at = now
+        incident.decision_note = f"rejected by {operator}" + (f": {reason}" if reason else "")
+        incident.touch()
+        self._persist(incident)
+
+        await self.publish_incident(incident)
+        return incident
+
+    async def dismiss(self, incident_id: str, operator: str) -> Incident:
+        incident = self.incidents.get(incident_id)
+        if incident is None:
+            raise HTTPException(status_code=404, detail="incident not found")
+        now = utc_now()
+        incident.status = IncidentStatus.DISMISSED
+        incident.decided_by = operator
+        incident.decided_at = now
+        incident.decision_note = f"dismissed by {operator}"
         incident.touch()
         self._persist(incident)
         await self.publish_incident(incident)
@@ -1030,6 +1069,40 @@ def create_app(
     )
     app.state.mg = state
 
+    # ------------------------------------------------------------------ auth
+
+    def require_cockpit_auth(authorization: str | None = Header(default=None)) -> str:
+        """Bearer auth for the control plane when MG_COCKPIT_TOKEN is set.
+
+        Returns the operator identity to record on human decisions. With no token
+        configured the control plane stays open (local demo default) and the
+        configured operator name is used, so the audit trail is still populated.
+        """
+        settings = state.settings
+        if not settings.cockpit_auth_enabled:
+            return settings.cockpit_operator
+
+        expected = settings.cockpit_token
+        supplied = ""
+        if authorization and authorization.lower().startswith("bearer "):
+            supplied = authorization[7:].strip()
+
+        if not supplied or not hmac.compare_digest(supplied, expected):
+            raise HTTPException(
+                status_code=401,
+                detail="invalid or missing cockpit token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return settings.cockpit_operator
+
+    def ws_token_ok(token: str | None) -> bool:
+        settings = state.settings
+        if not settings.cockpit_auth_enabled:
+            return True
+        if not token:
+            return False
+        return hmac.compare_digest(token, settings.cockpit_token)
+
     # ------------------------------------------------------------------ HTTP
 
     @app.get("/api/health")
@@ -1046,6 +1119,9 @@ def create_app(
     async def config() -> dict[str, Any]:
         return {
             "mode": state.settings.mode.value,
+            "cockpit_auth": (
+                "enabled" if state.settings.cockpit_auth_enabled else "disabled"
+            ),
             "models": {
                 "ooda": state.settings.ooda_model,
                 "forensics": state.settings.forensics_model,
@@ -1063,26 +1139,33 @@ def create_app(
             },
         }
 
-    @app.get("/api/state")
+    @app.get("/api/whoami", dependencies=[Depends(require_cockpit_auth)])
+    async def whoami(operator: str = Depends(require_cockpit_auth)) -> dict[str, Any]:
+        return {
+            "operator": operator,
+            "auth": "enabled" if state.settings.cockpit_auth_enabled else "disabled",
+        }
+
+    @app.get("/api/state", dependencies=[Depends(require_cockpit_auth)])
     async def snapshot() -> dict[str, Any]:
         return state.snapshot()
 
-    @app.get("/api/events")
+    @app.get("/api/events", dependencies=[Depends(require_cockpit_auth)])
     async def events(limit: int = 100) -> dict[str, Any]:
         return {"events": state.recent_events(max(1, min(limit, MAX_EVENT_HISTORY)))}
 
-    @app.get("/api/incidents")
+    @app.get("/api/incidents", dependencies=[Depends(require_cockpit_auth)])
     async def incidents(limit: int = 50) -> dict[str, Any]:
         return {"incidents": state.list_incidents(max(1, min(limit, 200)))}
 
-    @app.get("/api/incidents/{incident_id}")
+    @app.get("/api/incidents/{incident_id}", dependencies=[Depends(require_cockpit_auth)])
     async def incident_detail(incident_id: str) -> dict[str, Any]:
         incident = state.incidents.get(incident_id)
         if incident is None:
             raise HTTPException(status_code=404, detail="incident not found")
         return incident.model_dump(mode="json")
 
-    @app.get("/api/incidents/{incident_id}/casefile")
+    @app.get("/api/incidents/{incident_id}/casefile", dependencies=[Depends(require_cockpit_auth)])
     async def incident_casefile(incident_id: str, format: str = "markdown"):
         incident = state.incidents.get(incident_id)
         if incident is None:
@@ -1106,21 +1189,21 @@ def create_app(
             headers=disposition,
         )
 
-    @app.get("/api/incidents/{incident_id}/frame")
+    @app.get("/api/incidents/{incident_id}/frame", dependencies=[Depends(require_cockpit_auth)])
     async def incident_frame(incident_id: str):
         path = state.frame_path(incident_id)
         if path is None:
             raise HTTPException(status_code=404, detail="frame not available")
         return FileResponse(path, media_type="image/png")
 
-    @app.get("/api/incidents/{incident_id}/mask")
+    @app.get("/api/incidents/{incident_id}/mask", dependencies=[Depends(require_cockpit_auth)])
     async def incident_mask(incident_id: str):
         path = state.mask_path(incident_id)
         if path is None:
             raise HTTPException(status_code=404, detail="mask not available")
         return FileResponse(path, media_type="image/png")
 
-    @app.post("/api/attack")
+    @app.post("/api/attack", dependencies=[Depends(require_cockpit_auth)])
     async def attack() -> dict[str, Any]:
         result = await state.fire_attack()
         await state.connections.broadcast(
@@ -1128,41 +1211,55 @@ def create_app(
         )
         return result
 
-    @app.post("/api/simulate")
+    @app.post("/api/simulate", dependencies=[Depends(require_cockpit_auth)])
     async def simulate(request: SimulateRequest) -> dict[str, Any]:
         incident = await state.simulate(request.scenario)
         return incident.model_dump(mode="json")
 
     @app.post("/api/incidents/{incident_id}/approve")
-    async def approve(incident_id: str) -> dict[str, Any]:
-        incident = await state.approve(incident_id)
+    async def approve(
+        incident_id: str, operator: str = Depends(require_cockpit_auth)
+    ) -> dict[str, Any]:
+        incident = await state.approve(incident_id, operator)
+        return incident.model_dump(mode="json")
+
+    @app.post("/api/incidents/{incident_id}/reject")
+    async def reject(
+        incident_id: str,
+        payload: RejectRequest | None = Body(default=None),
+        operator: str = Depends(require_cockpit_auth),
+    ) -> dict[str, Any]:
+        reason = payload.reason if payload is not None else ""
+        incident = await state.reject(incident_id, operator, reason)
         return incident.model_dump(mode="json")
 
     @app.post("/api/incidents/{incident_id}/dismiss")
-    async def dismiss(incident_id: str) -> dict[str, Any]:
-        incident = await state.dismiss(incident_id)
+    async def dismiss(
+        incident_id: str, operator: str = Depends(require_cockpit_auth)
+    ) -> dict[str, Any]:
+        incident = await state.dismiss(incident_id, operator)
         return incident.model_dump(mode="json")
 
-    @app.get("/api/metrics")
+    @app.get("/api/metrics", dependencies=[Depends(require_cockpit_auth)])
     async def metrics(window_seconds: int = 300) -> dict[str, Any]:
         report = state.metrics(max(60, min(window_seconds, 3600)))
         return report.model_dump(mode="json")
 
-    @app.get("/api/gateway")
+    @app.get("/api/gateway", dependencies=[Depends(require_cockpit_auth)])
     async def gateway() -> dict[str, Any]:
         return await state.gateway_status()
 
-    @app.post("/api/incidents/{incident_id}/forensics")
+    @app.post("/api/incidents/{incident_id}/forensics", dependencies=[Depends(require_cockpit_auth)])
     async def forensics(incident_id: str) -> dict[str, Any]:
         incident = await state.run_forensics(incident_id)
         return incident.model_dump(mode="json")
 
-    @app.post("/api/incidents/{incident_id}/patch")
+    @app.post("/api/incidents/{incident_id}/patch", dependencies=[Depends(require_cockpit_auth)])
     async def patch(incident_id: str) -> dict[str, Any]:
         incident = await state.run_patch(incident_id)
         return incident.model_dump(mode="json")
 
-    @app.get("/api/scenarios")
+    @app.get("/api/scenarios", dependencies=[Depends(require_cockpit_auth)])
     async def scenarios() -> dict[str, Any]:
         return {
             "scenarios": [
@@ -1188,6 +1285,12 @@ def create_app(
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
+        token = websocket.query_params.get("token")
+        if not ws_token_ok(token):
+            # 4401 = application-level unauthorized, mirrors HTTP 401.
+            await websocket.close(code=4401)
+            return
+
         await state.connections.connect(websocket)
         try:
             await websocket.send_json(

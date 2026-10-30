@@ -127,6 +127,10 @@ class Settings:
     trust_forwarded_for: bool = False
     demo_attacker_ip: str = "203.0.113.66"
     attack_cooldown_seconds: float = 10.0
+
+    cockpit_token: str = ""
+    cockpit_operator: str = "local-operator"
+    management_networks: str = ""
     internal_api_token: str = ""
 
     fixtures_dir: Path = field(default_factory=lambda: FIXTURES_DIR)
@@ -157,6 +161,14 @@ class Settings:
         if not (self.modal_proxy_token and self.modal_proxy_token_secret):
             return ""
         return f"Bearer {self.modal_proxy_token}:{self.modal_proxy_token_secret}"
+
+    @property
+    def cockpit_auth_enabled(self) -> bool:
+        return bool(self.cockpit_token)
+
+    @property
+    def management_network_list(self) -> list[str]:
+        return [part.strip() for part in self.management_networks.split(",") if part.strip()]
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -243,6 +255,9 @@ def get_settings() -> Settings:
         trust_forwarded_for=_env("TRUST_FORWARDED_FOR", "0") in ("1", "true", "True"),
         demo_attacker_ip=_env("DEMO_ATTACKER_IP", "203.0.113.66"),
         attack_cooldown_seconds=_env_float("ATTACK_COOLDOWN_SECONDS", 10.0),
+        cockpit_token=_env("MG_COCKPIT_TOKEN"),
+        cockpit_operator=_env("MG_COCKPIT_OPERATOR", "local-operator"),
+        management_networks=_env("MG_MANAGEMENT_NETWORKS"),
         internal_api_token=_env("INTERNAL_API_TOKEN", ""),
         fixtures_dir=Path(_env("FIXTURES_DIR", str(FIXTURES_DIR))),
         runtime_dir=Path(_env("RUNTIME_DIR", str(RUNTIME_DIR))),

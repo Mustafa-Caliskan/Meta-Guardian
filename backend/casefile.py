@@ -63,6 +63,44 @@ def incident_timings(incident: Incident) -> dict[str, float | None]:
     return {"mttd_ms": mttd, "mttr_ms": mttr}
 
 
+def _human_decision(incident: Incident) -> dict[str, Any] | None:
+    """Who acted on this incident, when, and why.
+
+    Returns None when no human touched it: an automatic containment is an
+    automatic containment, and the report must not invent an approver.
+    """
+    policy = incident.policy
+    decided_by = incident.decided_by
+    decided_at = incident.decided_at
+    note = incident.decision_note
+
+    if decided_by is None and policy is not None:
+        decided_by = policy.approved_by or policy.rejected_by
+        decided_at = policy.approved_at or policy.rejected_at
+        note = note or policy.rejection_reason
+
+    if decided_by is None:
+        return None
+
+    if policy is not None and policy.rejected_by:
+        action = "rejected"
+        reason = policy.rejection_reason
+    elif policy is not None and policy.approved_by:
+        action = "approved"
+        reason = ""
+    else:
+        action = "dismissed"
+        reason = ""
+
+    return {
+        "action": action,
+        "operator": decided_by,
+        "at": _iso(decided_at),
+        "reason": reason,
+        "note": note,
+    }
+
+
 def build_casefile(incident: Incident) -> dict[str, Any]:
     """Canonical dict used by both the JSON response and the Markdown renderer."""
     decision = incident.decision
@@ -192,10 +230,12 @@ def build_casefile(incident: Incident) -> dict[str, Any]:
                 "approved_count": len(policy.approved_actions),
                 "pending_count": len(policy.pending_actions),
                 "rate_limited_count": len(policy.rate_limited_actions),
+                "ticket_owner_match": policy.ticket_owner_match,
             }
             if policy
             else None
         ),
+        "human_decision": _human_decision(incident),
         "mcp_actions": actions,
         "forensics": (
             {
@@ -351,6 +391,26 @@ def render_markdown(casefile: dict[str, Any]) -> str:
         ]
     else:
         lines += ["_No policy verdict recorded._", ""]
+
+    lines += ["## Human decision", ""]
+    human = casefile["human_decision"]
+    if human:
+        lines += [
+            "| Field | Value |",
+            "|---|---|",
+            f"| Action | `{_cell(human['action'])}` |",
+            f"| Operator | {_cell(human['operator'])} |",
+            f"| At | {_cell(human['at'])} |",
+            f"| Reason | {_cell(human['reason'] or 'n/a')} |",
+            "",
+        ]
+        if human["note"] and human["note"] != human["reason"]:
+            lines += [f"> {human['note']}", ""]
+    else:
+        lines += [
+            "_No human decision: this incident was handled by the deterministic gate._",
+            "",
+        ]
 
     lines += ["## Containment actions (MCP)", ""]
     if casefile["mcp_actions"]:

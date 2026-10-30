@@ -11,6 +11,8 @@
     events: [],
     gateway: null,
     metrics: null,
+    token: null,
+    operator: null,
     chart: null,
     ws: null,
     wsConnected: false,
@@ -21,6 +23,48 @@
 
   const MAX_LOG_ROWS = 180;
 
+
+  /* --------------------------------------------------------- token bar */
+
+  function wireTokenBar() {
+    const apply = $("tokenApply");
+    const input = $("tokenInput");
+    if (!apply || !input) return;
+
+    const submit = async () => {
+      const value = input.value.trim();
+      if (!value) return;
+      state.token = value;
+      try {
+        localStorage.setItem("mg_token", value);
+      } catch (_) { /* private mode */ }
+      try {
+        const who = await api("/api/whoami");
+        state.operator = who.operator;
+        const bar = $("tokenBar");
+        if (bar) bar.hidden = true;
+        await Promise.all([
+          loadSnapshot(),
+          loadEvents(),
+          loadIncidents(),
+          loadGateway(),
+          loadScenarios(),
+          loadMetrics(),
+        ]);
+        if (!state.wsConnected) connect();
+      } catch (error) {
+        state.token = null;
+        input.value = "";
+        input.placeholder = "invalid token, try again";
+        pushLocalEvent("error", `auth failed: ${error.message}`);
+      }
+    };
+
+    apply.addEventListener("click", submit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") submit();
+    });
+  }
 
   /* ------------------------------------------------------- alert banner */
 
@@ -186,9 +230,13 @@
     return `${Math.round(secs / 3600)}h ago`;
   };
 
+  function authHeaders() {
+    return state.token ? { Authorization: `Bearer ${state.token}` } : {};
+  }
+
   async function api(path, options = {}) {
     const response = await fetch(path, {
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       ...options,
     });
     if (!response.ok) {
@@ -502,6 +550,14 @@
       inspect.textContent = "INSPECT";
       inspect.addEventListener("click", () => loadIncident(incident.id));
       actions.appendChild(inspect);
+
+      if (pending > 0) {
+        const reject = document.createElement("button");
+        reject.className = "btn danger";
+        reject.textContent = "REJECT";
+        reject.addEventListener("click", () => rejectIncident(incident.id, reject));
+        actions.appendChild(reject);
+      }
 
       const caseFile = document.createElement("button");
       caseFile.className = "btn";
@@ -825,6 +881,23 @@
     button.disabled = false;
   }
 
+  async function rejectIncident(id, button) {
+    if (button) button.disabled = true;
+    try {
+      const incident = await api(`/api/incidents/${encodeURIComponent(id)}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "rejected from cockpit" }),
+      });
+      state.latest = incident;
+      await Promise.all([loadIncidents(), loadSnapshot()]);
+      renderTimeline(incident);
+    } catch (error) {
+      pushLocalEvent("error", `reject failed: ${error.message}`);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
   async function runForensics(id, button) {
     button.disabled = true;
     try {
@@ -891,7 +964,8 @@
 
   function connect() {
     const scheme = location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${scheme}://${location.host}/ws`);
+    const tokenParam = state.token ? `?token=${encodeURIComponent(state.token)}` : "";
+    const socket = new WebSocket(`${scheme}://${location.host}/ws${tokenParam}`);
     state.ws = socket;
 
     socket.onopen = () => {
@@ -958,13 +1032,66 @@
     $("statUptime").textContent = `${pad(h)}:${pad(m)}:${pad(s)}`;
   }
 
+  function readTokenFromLocation() {
+    const params = new URLSearchParams(location.search);
+    const fromUrl = params.get("token");
+    if (fromUrl) {
+      try {
+        localStorage.setItem("mg_token", fromUrl);
+      } catch (_) { /* private mode */ }
+      params.delete("token");
+      const query = params.toString();
+      const clean = location.pathname + (query ? `?${query}` : "") + location.hash;
+      history.replaceState(null, "", clean);
+      return fromUrl;
+    }
+    try {
+      return localStorage.getItem("mg_token");
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function showTokenBar() {
+    const bar = $("tokenBar");
+    if (bar) bar.hidden = false;
+  }
+
+  async function resolveToken() {
+    state.token = readTokenFromLocation();
+    try {
+      const who = await api("/api/whoami");
+      state.operator = who.operator;
+    } catch (_) {
+      state.operator = null;
+      if (state.config && state.config.cockpit_auth === "enabled") {
+        showTokenBar();
+      }
+    }
+  }
+
   async function boot() {
     setInterval(tickUptime, 1000);
     tickUptime();
 
     try {
+      await loadConfig();
+      await resolveToken();
+    } catch (error) {
+      pushLocalEvent("error", `auth bootstrap failed: ${error.message}`);
+    }
+
+    const authRequired = state.config && state.config.cockpit_auth === "enabled";
+    if (authRequired && !state.token) {
+      // Do not poll or open the socket without credentials: every call would
+      // 401 and the socket would reconnect-loop. The token bar is on screen.
+      renderTimeline(null);
+      renderEvidence(null);
+      return;
+    }
+
+    try {
       await Promise.all([
-        loadConfig(),
         loadSnapshot(),
         loadEvents(),
         loadIncidents(),
@@ -994,6 +1121,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     const attackButton = $("attackBtn");
     if (attackButton) attackButton.addEventListener("click", fireLiveAttack);
+    wireTokenBar();
     wireOverlays();
     boot();
   });

@@ -21,11 +21,31 @@ def test_all_frontend_files_are_valid_utf8():
         assert "\ufffd" not in text, name
 
 
+BROKEN_LITERALS = (
+    # the exact strings that were mangled when written through a cp1254 shell
+    "Traffic ? last",
+    "demo injector ? synthetic",
+    "real HTTP ? :8001",
+    "verified 200?403",
+    " ? docs/FULL_ARCHIVE_RUN.md",
+    "Cloud forensics ? ",
+    "returned ? surface",
+    'join(" ? ")',
+    "(hosted) ? needs",
+    "mask ? no network",
+)
+
+
 def test_no_broken_em_dash_or_arrow_in_user_visible_copy():
+    """Mojibake regression: these exact literals must never come back.
+
+    A blanket " ? " check is wrong because JavaScript ternaries legitimately
+    contain that sequence, so the check is pinned to the strings that broke.
+    """
     for name in ("index.html", "app.js"):
         text = read(name)
-        # a lone " ? " outside JS ternaries was the signature of the encoding bug
-        assert " ? " not in text.replace("? `", "").replace('? "', "").replace("? new", "").replace("? esc(", "").replace("? blocked", "").replace("? revoked", "").replace("? results", "").replace("? `rate", ""), name
+        for broken in BROKEN_LITERALS:
+            assert broken not in text, f"{name} still contains {broken!r}"
 
 
 def test_user_visible_copy_uses_real_glyphs():
