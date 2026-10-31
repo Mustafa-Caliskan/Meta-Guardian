@@ -178,3 +178,19 @@ human was involved when the deterministic gate acted alone.
 
 `reject` executes nothing: it clears the pending actions, marks the incident
 `dismissed`, and records the reason.
+
+## 8. Case-file integrity ledger and its limit
+
+Every persisted incident revision appends a row to
+`data/runtime/hashchain.jsonl` (`incident_id`, `content_sha256`, `prev_sha256`,
+`recorded_at`, `kind`). `GET /api/incidents/{id}/casefile?verify=1` compares the
+on-disk record with the last row for that incident and reports `chain_valid`,
+plus the ledger line where the chain broke. Approve/reject are legitimate
+updates: they append a row instead of rewriting history, so the chain stays
+valid.
+
+**Limit, stated plainly:** the ledger is append-only and detects edits that do
+not recompute the past (out-of-band file changes, a tampered middle row). It
+does **not** protect against an attacker who can rewrite the entire chain: there
+is no cryptographic signature and no notarisation. The defensible claim is
+**change detection**, not "tamper-proof".

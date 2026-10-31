@@ -253,7 +253,9 @@ class OODAAgent:
             payload, response = await self.llm.complete_json(messages, task=task)
         except Exception as exc:  # noqa: BLE001 - never let the loop crash
             return self._fallback_decision(
-                incident_id, f"LLM unavailable: {type(exc).__name__}: {exc}"
+                incident_id,
+                f"LLM unavailable: {type(exc).__name__}: {exc}",
+                evidence=evidence,
             )
 
         classification = CLASSIFICATION_MAP.get(
@@ -297,7 +299,40 @@ class OODAAgent:
             )
         return actions
 
-    def _fallback_decision(self, incident_id: str, reason: str) -> OODADecision:
+    def _fallback_decision(
+        self,
+        incident_id: str,
+        reason: str,
+        *,
+        evidence: dict[str, Any] | None = None,
+    ) -> OODADecision:
+        """Deterministic decision when the model is unavailable.
+
+        Without this the loop degraded to BENIGN_UNKNOWN -> MONITOR -> DISMISSED,
+        which is fail-open: a real exfiltration attempt with no LLM would be
+        silently dropped. The evidence itself is enough to escalate a network
+        attack to the approval band; USB-only evidence keeps the old behaviour
+        because the absence of a model is not, by itself, proof of a threat.
+        """
+        signals = self._degraded_signals(evidence or {})
+        if signals:
+            return OODADecision(
+                incident_id=incident_id,
+                classification=Classification.THREAT_CRITICAL,
+                severity=Severity.HIGH,
+                confidence=0.55,
+                reasoning=(
+                    f"{reason} | deterministic fallback escalated: "
+                    f"{', '.join(signals)}; no model verdict, so containment "
+                    "requires human approval"
+                ),
+                evidence_summary=(
+                    "decision degraded to approval-only: "
+                    + ", ".join(signals)
+                ),
+                actions=[],
+                model="fallback",
+            )
         return OODADecision(
             incident_id=incident_id,
             classification=Classification.BENIGN_UNKNOWN,
@@ -308,6 +343,40 @@ class OODAAgent:
             actions=[],
             model="fallback",
         )
+
+    @staticmethod
+    def _degraded_signals(evidence: dict[str, Any]) -> list[str]:
+        """Network markers that justify escalation even without a model.
+
+        Deliberately narrow: only evidence the sanitizer already recorded, never
+        an inference about intent. A bare USB insertion is not in this list.
+        """
+        sql_markers = ("union select", "or 1=1", "' or '1'='1", "; drop", "xp_cmdshell")
+        exfil_markers = ("aircraft=all", "limit=99999", "export=all", "dump=true")
+        signals: list[str] = []
+
+        for event in evidence.get("events") or []:
+            payload = event if isinstance(event, dict) else {}
+            kind = str(payload.get("type", ""))
+            if kind not in ("suspicious_api_request", "admin_command"):
+                continue
+            text = " ".join(
+                str(payload.get(key, "")) for key in ("path", "method", "summary")
+            ).lower()
+            status = payload.get("status")
+            if any(marker in text for marker in exfil_markers) or (
+                "/ops/data" in text and str(status) == "200"
+            ):
+                if "exfiltration attempt in the audit log" not in signals:
+                    signals.append("exfiltration attempt in the audit log")
+            if any(marker in text for marker in sql_markers):
+                if "injection markers in the request" not in signals:
+                    signals.append("injection markers in the request")
+            has_route = bool(payload.get("path"))
+            if has_route and not payload.get("session"):
+                if "request carried no session token" not in signals:
+                    signals.append("request carried no session token")
+        return signals
 
     # -- target enrichment ---------------------------------------------------
 

@@ -409,3 +409,97 @@ async def test_mock_llm_does_not_call_empty_seat_a_credential_misuse():
     assert incident.decision.classification is Classification.GHOST_ATTACK
     assert incident.policy.mode is PolicyMode.AUTO
     assert mcp.calls
+
+# ------------------------------------- task 6: deterministic fallback -------
+
+async def test_llm_outage_with_exfiltration_fails_closed_to_approval():
+    mcp = FakeMCP()
+    store = ChangeTicketStore(tickets=[])
+    agent = OODAAgent(
+        StubLLM(error=RuntimeError("provider down")),
+        policy=PolicyEngine(store),
+        mcp=mcp,
+        change_tickets=store,
+    )
+
+    incident = await agent.run(
+        [usb_event(), network_event()], vision(True), now=utc_now()
+    )
+
+    assert incident.decision.model == "fallback"
+    assert incident.decision.classification is Classification.THREAT_CRITICAL
+    assert incident.decision.confidence == pytest.approx(0.55)
+    assert incident.policy.mode is PolicyMode.APPROVAL
+    assert incident.policy.pending_actions
+    assert incident.status is IncidentStatus.OPEN
+    assert mcp.calls == []
+    assert "exfiltration" in incident.decision.reasoning
+
+
+async def test_llm_outage_with_only_usb_keeps_monitor_only():
+    mcp = FakeMCP()
+    store = ChangeTicketStore(tickets=[])
+    agent = OODAAgent(
+        StubLLM(error=RuntimeError("provider down")),
+        policy=PolicyEngine(store),
+        mcp=mcp,
+        change_tickets=store,
+    )
+
+    incident = await agent.run([usb_event()], vision(True), now=utc_now())
+
+    assert incident.decision.model == "fallback"
+    assert incident.decision.classification is Classification.BENIGN_UNKNOWN
+    assert incident.policy.mode is PolicyMode.MONITOR
+    assert incident.status is IncidentStatus.DISMISSED
+    assert mcp.calls == []
+
+
+async def test_llm_outage_with_sql_injection_markers_escalates():
+    from backend.models import EventSource, EventType, SecurityEvent
+
+    sqli = SecurityEvent(
+        source=EventSource.NETWORK,
+        type=EventType.SUSPICIOUS_API_REQUEST,
+        severity=Severity.HIGH,
+        summary="GET /api/v1/ops/flights?aircraft=1 UNION SELECT password FROM users",
+        payload={
+            "ip": "203.0.113.66",
+            "path": "/api/v1/ops/flights",
+            "method": "GET",
+            "status": 200,
+        },
+    )
+    store = ChangeTicketStore(tickets=[])
+    agent = OODAAgent(
+        StubLLM(error=RuntimeError("provider down")),
+        policy=PolicyEngine(store),
+        mcp=FakeMCP(),
+        change_tickets=store,
+    )
+
+    incident = await agent.run([sqli], vision(True), now=utc_now())
+
+    assert incident.decision.classification is Classification.THREAT_CRITICAL
+    assert incident.policy.mode is PolicyMode.APPROVAL
+    assert "injection" in incident.decision.reasoning
+
+
+async def test_llm_outage_ghost_path_stays_deterministic_auto():
+    """Regression: the admin + empty-seat rule already worked without the model."""
+    mcp = FakeMCP()
+    store = ChangeTicketStore(tickets=[])
+    agent = OODAAgent(
+        StubLLM(error=RuntimeError("provider down")),
+        policy=PolicyEngine(store),
+        mcp=mcp,
+        change_tickets=store,
+    )
+
+    incident = await agent.run([admin_event()], vision(False), now=utc_now())
+
+    assert incident.decision.model == "fallback"
+    assert incident.policy.classification is Classification.GHOST_ATTACK
+    assert incident.policy.mode is PolicyMode.AUTO
+    assert incident.status is IncidentStatus.CONTAINED
+    assert mcp.calls

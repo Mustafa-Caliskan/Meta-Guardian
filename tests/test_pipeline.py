@@ -295,3 +295,30 @@ def test_segmentation_is_scheduled_off_the_response_path(tmp_path, monkeypatch):
         assert incident["id"]
         # The HTTP response must not wait for the 0.4 s "slow" segmentation.
         assert elapsed < 0.4
+
+def test_llm_outage_end_to_end_never_silently_dismisses_an_exfiltration(tmp_path):
+    """Edge case from task 6: no model, real network attack, policy still gates."""
+    from tests.support import StubLLM, network_event, usb_event
+
+    state = build_state(tmp_path)
+    state.agent.llm = StubLLM(error=RuntimeError("provider down"))
+    state.forensics.llm = state.agent.llm
+
+    with TestClient(create_app(state)) as client:
+
+        async def publish():
+            await state.publish(usb_event(str(tmp_path / "usb")))
+            await state.publish(network_event())
+
+        client.portal.call(publish)
+        wait_for_incidents(state)
+
+        incidents = client.get("/api/incidents").json()["incidents"]
+        assert len(incidents) == 1
+        incident = incidents[0]
+        assert incident["decision"]["model"] == "fallback"
+        assert incident["decision"]["classification"] == "THREAT_CRITICAL"
+        assert incident["policy"]["mode"] == "approval"
+        assert incident["policy"]["pending_actions"]
+        assert incident["status"] == "open"
+        assert state.mcp.calls == []
