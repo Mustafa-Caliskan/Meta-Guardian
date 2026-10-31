@@ -366,3 +366,46 @@ async def test_block_ip_drops_when_evidence_only_has_infrastructure_ips():
 
     assert mcp.calls == []
     assert "never blocked" in incident.decision.reasoning
+
+# ------------------------------------------ task 4: session provenance -------
+
+async def test_evidence_carries_session_identity_and_origin_scope():
+    agent, _ = make_agent()
+    evidence = agent.build_evidence(
+        [admin_event(session_owner="ops-admin", session_origin_ip="203.0.113.66")],
+        vision(True),
+        utc_now(),
+    )
+
+    assert evidence["session_owner"] == "ops-admin"
+    assert evidence["session_role"] == "admin"
+    assert evidence["session_origin_ip"] == "203.0.113.66"
+    assert evidence["session_origin_scope"] == "remote"
+
+
+async def test_mock_llm_detects_credential_misuse():
+    agent, mcp = make_agent()
+    incident = await agent.run(
+        [admin_event(session_origin_ip="203.0.113.66")],
+        vision(True),
+        now=utc_now(),
+    )
+
+    assert incident.decision.classification is Classification.CREDENTIAL_MISUSE
+    assert incident.policy.mode is PolicyMode.APPROVAL
+    assert incident.status is IncidentStatus.OPEN
+    assert incident.scenario == "B"
+    assert mcp.calls == []
+
+
+async def test_mock_llm_does_not_call_empty_seat_a_credential_misuse():
+    agent, mcp = make_agent()
+    incident = await agent.run(
+        [admin_event(session_origin_ip="203.0.113.66")],
+        vision(False),
+        now=utc_now(),
+    )
+
+    assert incident.decision.classification is Classification.GHOST_ATTACK
+    assert incident.policy.mode is PolicyMode.AUTO
+    assert mcp.calls

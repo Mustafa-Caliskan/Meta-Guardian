@@ -235,6 +235,11 @@ def build_casefile(incident: Incident) -> dict[str, Any]:
                 "pending_count": len(policy.pending_actions),
                 "rate_limited_count": len(policy.rate_limited_actions),
                 "ticket_owner_match": policy.ticket_owner_match,
+                "session": {
+                    "owner": policy.session_owner,
+                    "role": policy.session_role,
+                    "origin_ip": policy.session_origin_ip,
+                },
             }
             if policy
             else None
@@ -392,6 +397,9 @@ def render_markdown(casefile: dict[str, Any]) -> str:
             f"| Mode | `{_cell(policy['mode'])}` |",
             f"| Reason | {_cell(policy['reason'])} |",
             f"| Change ticket | {_cell(policy['ticket_id'])} |",
+            f"| Session | {_cell((policy.get('session') or {}).get('owner'))} / "
+            f"{_cell((policy.get('session') or {}).get('role'))} / "
+            f"origin {_cell((policy.get('session') or {}).get('origin_ip'))} |",
             f"| Approved / pending / limited | {policy['approved_count']} / {policy['pending_count']} / {policy['rate_limited_count']} |",
             "",
         ]

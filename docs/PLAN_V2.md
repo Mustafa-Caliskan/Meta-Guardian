@@ -19,7 +19,7 @@ Durma kuralı: süre %50 aşarsa dur, yarım iş commit edilmez, raporla.
 | 1 | S2: Kokpit auth + onaycı kimliği | ✅ 645276a |
 | 2 | A1: Bilet ↔ oturum sahibi ↔ rol bağı + audit enrichment | ✅ fb22509 |
 | 3 | S1: Kamera tamper tespiti, fail-closed | ✅ 0d4a399 |
-| 4 | A2: Konsol çakışması / CREDENTIAL_MISUSE | ⏳ SIRADAKİ (~3 saat) |
+| 4 | A2: Konsol çakışması / CREDENTIAL_MISUSE | ✅ |
 | 5 | A3: Append-only hash ledger | ☐ (~1 saat) |
 | 6 | S3-lite: Deterministik fallback (fail-open kapat) | ☐ (~1 saat) |
 | 7 | S5: Kare saklama süresi | ☐ (~1 saat) |

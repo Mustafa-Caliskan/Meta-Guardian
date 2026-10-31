@@ -148,7 +148,9 @@
         "critical",
         tampered
           ? `CAMERA TAMPERED · FAIL-CLOSED · ${classification} · ${id} · awaiting human approval`
-          : `AWAITING HUMAN APPROVAL · ${classification} · ${id} · confidence ${(decision.confidence ?? 0).toFixed(2)}`,
+          : classification === "CREDENTIAL_MISUSE"
+            ? `CREDENTIAL MISUSE · ${classification} · ${id} · remote session while operator present · approval required`
+            : `AWAITING HUMAN APPROVAL · ${classification} · ${id} · confidence ${(decision.confidence ?? 0).toFixed(2)}`,
         0
       );
       return;
@@ -507,9 +509,9 @@
     if (!classification) return "warn";
     if (classification === "BENIGN_AUTHORIZED") return "ok";
     if (classification === "THREAT_CRITICAL" || classification === "GHOST_ATTACK") return "bad";
+    if (classification === "CREDENTIAL_MISUSE") return "warn";
     return "warn";
   }
-
   function renderIncidents() {
     const host = $("incidentList");
     if (!state.incidents.length) {
@@ -536,6 +538,7 @@
           <span class="pill">conf ${(decision.confidence ?? 0).toFixed(2)}</span>
           <span class="pill ${policy.mode === "approval" ? "warn" : policy.mode === "monitor" ? "" : "ok"}">${esc(policy.mode || "—")}</span>
           <span class="pill">${(incident.action_results || []).length} action(s)</span>
+          ${policy.session && policy.session.origin_ip ? `<span class="pill warn">origin ${esc(policy.session.origin_ip)}</span>` : ""}
           ${incident.vision && incident.vision.tampered ? '<span class="pill warn">CAMERA TAMPERED</span>' : ""}
           ${incident.forensics ? `<span class="pill ${incident.forensics.citations_verified ? "ok" : "warn"}">forensics ${incident.forensics.citations_verified ? "verified" : "unverified"}</span>` : ""}
           ${incident.patch ? `<span class="pill ${incident.patch.verified ? "ok" : "bad"}">patch ${incident.patch.verified ? "200 → 403" : "failed"}</span>` : ""}

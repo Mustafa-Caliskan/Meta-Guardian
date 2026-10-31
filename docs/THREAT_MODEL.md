@@ -37,6 +37,7 @@ Trust boundaries:
 | T1 | Local insider / visitor | Inserts removable media with an unsigned PowerShell payload | `psutil` partition-added event + file scan (`payload.ps1`) + camera ROI | Quarantine file, record SHA-256 |
 | T2 | Remote attacker | Unauthenticated exfiltration against `/api/v1/ops/data` | Request log tail: endpoint + missing session + exfil markers | Block source IP, revoke session |
 | T3 | Remote attacker | Reconnaissance days before the attack | 1M-context scan of 30-day archive, timestamp validation | Foresnsics report with citations |
+| T4b | Remote attacker with a stolen admin token | Hijacked admin session issued from a remote origin while the legitimate operator sits at the console | Camera: `operator_present == true` **and** session origin outside loopback/management networks during a privileged call | Classify `CREDENTIAL_MISUSE`, never auto-contain, require human approval |
 | T4 | Remote attacker | "Ghost" admin command while the seat is empty | Camera: `operator_present == false` during privileged call | Revoke session, classify `GHOST_ATTACK` |
 | T5 | Malicious or careless engineer | Legitimate maintenance during an approved window | Change ticket covers timestamp **and** operator present | Classify `BENIGN_AUTHORIZED`, no action |
 | T6 | Reviewer | LLM hallucinates a log line or a patch | Citation verifier + deterministic patch template + rollback | Report rejected, no change applied |
@@ -135,6 +136,7 @@ benchmark produced it.
 | Public detection bypass via a fixed marker | The marker is authenticated with `INTERNAL_API_TOKEN` (constant-time compare); a public value would be a documented evasion | `backend/target_service.py` |
 | MTTD understated by the log poll interval | Event timestamps come from the request's own `ts` field, not from the tailer read time | `backend/edge/usb_net_watcher.py` |
 | Slow segmentation freezing the cockpit | Segmentation is scheduled after publish, outside the bundle lock | `backend/main.py` |
+| Privileged command from a remote origin while the operator is physically present | Reported as `CREDENTIAL_MISUSE`; always queued for human approval, never auto-contained | `backend/edge/policy_engine.py`, `backend/edge/ooda_agent.py` |
 | Camera tampering (covered lens) read as "empty seat" | Flat/dark/blown-out frames are reported as `tampered`, never as presence, and a privileged command during tampering fails closed to human approval | `backend/vision/operator.py`, `backend/edge/policy_engine.py` |
 
 ## 6. What the demo must not claim

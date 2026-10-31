@@ -55,6 +55,17 @@ class MockLLM(BaseLLM):
             classification = "BENIGN_AUTHORIZED"
             reasoning = "Change ticket covers the event window and an operator is present."
         elif (
+            '"session_origin_scope":"remote"' in compact
+            and '"operator_present":true' in compact
+            and "admin_command" in compact
+        ):
+            classification = "CREDENTIAL_MISUSE"
+            reasoning = (
+                "Privileged admin command arrived from a remote origin while an "
+                "operator is physically at the console: the token is being used "
+                "from somewhere the operator is not."
+            )
+        elif (
             '"operator_present":false' in compact
             and "admin_command" in compact
         ):
@@ -83,11 +94,24 @@ class MockLLM(BaseLLM):
                     "reason": "Session used by the remote attacker.",
                 },
             ]
+        elif classification == "CREDENTIAL_MISUSE":
+            actions = [
+                {
+                    "action": "block_ip_on_gateway",
+                    "target": "203.0.113.66",
+                    "reason": "Remote origin using a privileged session.",
+                },
+                {
+                    "action": "revoke_session_token",
+                    "target": "session-7f3a9c",
+                    "reason": "Hijacked admin session should be revoked.",
+                },
+            ]
 
         return {
             "classification": classification,
             "severity": "critical" if classification != "BENIGN_AUTHORIZED" else "low",
-            "confidence": 0.93,
+            "confidence": 0.72 if classification == "CREDENTIAL_MISUSE" else 0.93,
             "reasoning": reasoning,
             "evidence_summary": "Correlated USB insertion, suspicious API request and camera frame.",
             "actions": actions,

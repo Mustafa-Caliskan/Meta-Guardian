@@ -37,7 +37,11 @@ from ..models import (
 )
 from ..netguard import is_protected_address
 from .mcp_server import MCPToolError
-from .policy_engine import ChangeTicketStore, PolicyEngine
+from .policy_engine import (
+    ChangeTicketStore,
+    PolicyEngine,
+    origin_scope,
+)
 
 OODA_SYSTEM_PROMPT = """You are Meta-Guardian, an autonomous blue-team SOC agent.
 Analyse the evidence bundle and reply with STRICT JSON only, no markdown.
@@ -159,6 +163,10 @@ class OODAAgent:
         presence_known = bool(vision and vision.presence_known)
         ticket = self.tickets.find_covering(moment)
         ticket_valid = bool(ticket and operator_present)
+        identity = PolicyEngine._session_identity(events)
+        scope = origin_scope(
+            identity.get("origin_ip"), get_settings().management_network_list
+        )
 
         return {
             "operator_present": operator_present,
@@ -175,6 +183,10 @@ class OODAAgent:
                 else None
             ),
             "presence_known": presence_known,
+            "session_owner": identity.get("owner"),
+            "session_role": identity.get("role"),
+            "session_origin_ip": identity.get("origin_ip"),
+            "session_origin_scope": scope,
             "event_count": len(events),
             "events": [
                 self._event_digest(event) for event in events[:MAX_EVIDENCE_EVENTS]
@@ -191,7 +203,17 @@ class OODAAgent:
             "summary": event.summary[:300],
             "timestamp": event.timestamp.isoformat(),
         }
-        for key in ("mountpoint", "ip", "path", "method", "status", "session"):
+        for key in (
+            "mountpoint",
+            "ip",
+            "path",
+            "method",
+            "status",
+            "session",
+            "session_owner",
+            "session_role",
+            "session_origin_ip",
+        ):
             if key in payload:
                 digest[key] = payload[key]
         findings = payload.get("findings")
@@ -421,6 +443,9 @@ class OODAAgent:
 
     @staticmethod
     def _scenario_for(classification: Classification, fallback: str) -> str:
+        if classification is Classification.CREDENTIAL_MISUSE:
+            # A hijacked admin session is still the remote-session story.
+            return "B"
         if classification is Classification.GHOST_ATTACK:
             return "B"
         if classification is Classification.BENIGN_AUTHORIZED:

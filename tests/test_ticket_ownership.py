@@ -60,7 +60,12 @@ def test_matching_ticket_and_admin_role_suppresses_the_alert():
 
 
 def test_ticket_owned_by_someone_else_does_not_suppress():
-    """The actual privilege-escalation path: open a ticket, run someone else's job."""
+    """The actual privilege-escalation path: open a ticket, run someone else's job.
+
+    Since task 4 this is additionally a console collision: the mismatched session
+    originates remotely while an operator sits at the desk, so it is classified
+    CREDENTIAL_MISUSE and requires a human instead of auto-containing.
+    """
     engine = engine_with(covering_ticket(operator="ops-engineer"))
     outcome = engine.evaluate(
         events=[admin_event(session_owner="ops-admin", session_role="admin")],
@@ -69,8 +74,9 @@ def test_ticket_owned_by_someone_else_does_not_suppress():
         now=utc_now(),
     )
 
-    assert outcome.classification is not Classification.BENIGN_AUTHORIZED
-    assert outcome.mode is PolicyMode.AUTO
+    assert outcome.classification is Classification.CREDENTIAL_MISUSE
+    assert outcome.mode is PolicyMode.APPROVAL
+    assert outcome.approved_actions == []
     assert outcome.ticket_owner_match is False
     assert "belongs to ops-engineer" in outcome.reason
     assert "event ran as ops-admin" in outcome.reason

@@ -17,6 +17,7 @@ Rules:
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import threading
 import time
@@ -48,6 +49,36 @@ DESTRUCTIVE_ACTIONS = {
     ActionType.REVOKE_SESSION_TOKEN,
     ActionType.KILL_PROCESS,
 }
+
+LOCAL = "local"
+MANAGEMENT = "management"
+REMOTE = "remote"
+UNKNOWN_ORIGIN = "unknown"
+
+
+def origin_scope(origin_ip: str | None, management_networks: Iterable[str] = ()) -> str:
+    """Classify where a session originated from.
+
+    ``local`` means loopback on the protected host, ``management`` means the
+    address falls inside a configured management CIDR, ``remote`` is everything
+    else that parses as an IP. Anything we cannot parse is ``unknown`` so the
+    caller never treats missing provenance as proof of a remote attack.
+    """
+    if not origin_ip:
+        return UNKNOWN_ORIGIN
+    try:
+        address = ipaddress.ip_address(str(origin_ip).strip())
+    except ValueError:
+        return UNKNOWN_ORIGIN
+    if address.is_loopback:
+        return LOCAL
+    for network in management_networks:
+        try:
+            if address in ipaddress.ip_network(str(network).strip(), strict=False):
+                return MANAGEMENT
+        except ValueError:
+            continue
+    return REMOTE
 
 
 class ChangeTicketStore:
@@ -168,6 +199,7 @@ class PolicyEngine:
         min_auto_confidence: float = 0.85,
         min_approval_confidence: float = 0.50,
         rate_limiter: SlidingWindowRateLimiter | None = None,
+        management_networks: Iterable[str] | None = None,
     ) -> None:
         if not 0.0 <= min_approval_confidence <= min_auto_confidence <= 1.0:
             raise ValueError("confidence thresholds must satisfy 0 <= approval <= auto <= 1")
@@ -175,6 +207,11 @@ class PolicyEngine:
         self.min_auto_confidence = min_auto_confidence
         self.min_approval_confidence = min_approval_confidence
         settings = get_settings()
+        self.management_networks = list(
+            settings.management_network_list
+            if management_networks is None
+            else management_networks
+        )
         self.rate_limiter = rate_limiter or SlidingWindowRateLimiter(
             max_events=settings.max_actions_per_minute, window_seconds=60.0
         )
@@ -202,6 +239,13 @@ class PolicyEngine:
         ticket = self.tickets.find_covering(_ensure_tz(now))
         identity = self._session_identity(events)
         matched, note = self._ticket_match(ticket, identity)
+
+        if outcome.session_owner is None:
+            outcome.session_owner = identity.get("owner")
+        if outcome.session_role is None:
+            outcome.session_role = identity.get("role")
+        if outcome.session_origin_ip is None:
+            outcome.session_origin_ip = identity.get("origin_ip")
 
         if outcome.ticket_owner_match is None:
             outcome.ticket_owner_match = matched
@@ -277,10 +321,57 @@ class PolicyEngine:
         # that actually ran the action. Anyone able to open a ticket must not be
         # able to whitelist somebody else's privileged command.
         ticket_owner_match, _ = self._ticket_match(ticket, identity)
+        scope = origin_scope(identity.get("origin_ip"), self.management_networks)
+
+        # Legitimate remote IT work: the ticket names the session owner, the
+        # session originates from a management network, and nobody is physically
+        # at the console. That is not a ghost attack, it is approved remote work.
+        remote_management_work = (
+            presence_known
+            and not operator_present
+            and scope == MANAGEMENT
+        )
 
         if ticket is not None and operator_present and ticket_owner_match:
             return self._authorized(
-                proposed, ticket, operator_present, moment, identity
+                proposed, ticket, operator_present, moment, identity, scope
+            )
+
+        if ticket is not None and ticket_owner_match and remote_management_work:
+            return self._authorized(
+                proposed, ticket, operator_present, moment, identity, scope
+            )
+
+        # Credential misuse: a privileged command is executed from a remote
+        # origin while somebody is physically sitting at the console. The log
+        # alone cannot tell this apart from the real operator's own request, but
+        # the camera can: the person at the desk is not the person behind the
+        # token. This is a contradictory signal, not proof, so it always goes to
+        # a human and never auto-contains.
+        if (
+            has_admin
+            and presence_known
+            and operator_present
+            and scope == REMOTE
+        ):
+            actions = self._candidate_actions(proposed, events)
+            if not actions:
+                actions = self.default_containment(events)
+            return PolicyOutcome(
+                classification=Classification.CREDENTIAL_MISUSE,
+                severity=Severity.CRITICAL,
+                confidence=max(0.85, min(1.0, float(proposed.confidence))),
+                mode=PolicyMode.APPROVAL,
+                reason=(
+                    "privileged command from remote origin "
+                    f"{identity.get('origin_ip')} while an operator is physically "
+                    "present: session likely hijacked (credential misuse); "
+                    "human approval required"
+                ),
+                operator_present=operator_present,
+                ticket_owner_match=ticket_owner_match,
+                pending_actions=actions,
+                evaluated_at=moment,
             )
 
         if has_admin and presence_known and not operator_present:
@@ -434,9 +525,21 @@ class PolicyEngine:
         operator_present: bool,
         moment: datetime,
         identity: dict[str, Any] | None = None,
+        scope: str = UNKNOWN_ORIGIN,
     ) -> PolicyOutcome:
         origin = (identity or {}).get("origin_ip")
-        origin_note = f" from {origin}" if origin else ""
+        origin_note = ""
+        if origin:
+            origin_note = f" from {origin}"
+            if scope == MANAGEMENT:
+                origin_note += " (known management source)"
+        if operator_present:
+            presence_note = f"an operator is present at {moment.isoformat()}"
+        else:
+            presence_note = (
+                "no operator is at the console, but the session came from a "
+                "known management source"
+            )
         return PolicyOutcome(
             classification=Classification.BENIGN_AUTHORIZED,
             severity=Severity.LOW,
@@ -444,8 +547,8 @@ class PolicyEngine:
             mode=PolicyMode.MONITOR,
             reason=(
                 f"change ticket {ticket.ticket_id} belongs to {ticket.operator}, "
-                f"the session ran as that operator{origin_note}, and an operator "
-                f"is present at {moment.isoformat()}"
+                f"the session ran as that operator{origin_note}, and "
+                f"{presence_note}"
             ),
             ticket_id=ticket.ticket_id,
             operator_present=operator_present,

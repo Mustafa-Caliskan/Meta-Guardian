@@ -49,6 +49,7 @@ class Severity(str, Enum):
 class Classification(str, Enum):
     THREAT_CRITICAL = "THREAT_CRITICAL"
     GHOST_ATTACK = "GHOST_ATTACK"
+    CREDENTIAL_MISUSE = "CREDENTIAL_MISUSE"
     BENIGN_AUTHORIZED = "BENIGN_AUTHORIZED"
     BENIGN_UNKNOWN = "BENIGN_UNKNOWN"
 
@@ -153,6 +154,11 @@ class PolicyOutcome(BaseModel):
     rejected_at: datetime | None = None
     rejection_reason: str = ""
     ticket_owner_match: bool | None = None
+
+    # Session provenance the verdict was based on (from the target audit log).
+    session_owner: str | None = None
+    session_role: str | None = None
+    session_origin_ip: str | None = None
 
 
 class MCPActionResult(BaseModel):
