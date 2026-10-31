@@ -272,14 +272,35 @@ blocklist target stays realistic without pretending a forged header is authorita
 `docker compose up --build -d`, then the live attack button or `scripts/trigger_attack.py`.
 Target on `:8001`, `LLM_MODE=mock` so the numbers are reproducible offline.
 
-| Metric | Observed across runs | What it covers |
-|---|---|---|
-| MTTD | **236–371 ms** | first correlated event (request `ts`) → OODA decision |
-| MTTR | **42–93 ms** | decision → last successful MCP action |
-| Patch + verification | **115–123 ms** | apply rule → replay attack → `HTTP 403` observed |
-| Actions succeeded / failed | 2 / 0 | block IP plus (when a session exists) revoke |
-| False positives on Scenario C | 0 | approved maintenance is suppressed |
-| Incidents opened per attack | 1 | the verification replay is not re-detected |
+Every number carries the mode it was measured in: `docker` = the compose stack
+(`target-api` + `soc-cockpit`), `in-process` = the benchmark harness driving the same code
+without containers, `live` = a real provider call.
+
+| Metric | Observed | Mode | What it covers |
+|---|---|---|---|
+| MTTD | **401–503 ms** (3 runs) | `docker` · mock LLM | request `ts` → OODA decision |
+| MTTR | **40–46 ms** | `docker` · mock LLM | decision → last successful MCP action (1 action: IP block) |
+| Patch + verification | **124–142 ms** | `docker` · mock LLM | apply rule → replay attack → `HTTP 403` observed |
+| Edge correlation only | **0.5–1.6 ms** | `in-process` · mock | `correlator.observe()` → incident bundle; this is *not* MTTD, it excludes the model call |
+| Actions succeeded / failed | 1 / 0 | `docker` | IP block; a session revoke is only possible when the evidence carries a session |
+| False positives on Scenario C | 0 | `in-process` · mock | approved maintenance is suppressed (`BENIGN_AUTHORIZED`) |
+| Incidents opened per attack | 1 | `docker` | the verification replay is not re-detected |
+
+Reproduce:
+
+```bash
+docker compose up --build -d
+python scripts/trigger_attack.py --reset --exfil --watch --patch   # PATCH VERIFIED
+curl -s http://127.0.0.1:8000/api/metrics                          # MTTD / MTTR / patch
+python scripts/benchmark_latency.py --patch                        # A/B/C + KPI report
+python scripts/benchmark_baseline.py --patch                       # naive vs guardian
+```
+
+Two honest caveats about this table. MTTR is short because a pure exfiltration request from a
+demo IP yields exactly one actionable tool call; the USB scenarios add quarantine on top. And
+a raw `--exfil` run without `TRUST_FORWARDED_FOR` sees the loopback source, which is a
+protected infrastructure address and is deliberately never blocked — that run ends with
+"no containment action proposed" and only the WAF patch as remediation.
 
 Live model mode adds provider latency to MTTD: the recorded Baseten OODA call takes
 **2.8–3.5 s**, which is why segmentation and forensics run after the incident is broadcast
@@ -287,9 +308,9 @@ instead of inside the detection path.
 
 ### 1M-context forensics run
 
-| Metric | Measured |
-|---|---|
-| Input tokens in a single request | **1,026,768** (hard limit 1,048,544) |
+| Metric | Measured | Mode |
+|---|---|---|
+| Input tokens in a single request | **1,026,768** (hard limit 1,048,544) | `live` (Meta Model API) |
 | Archive lines sent | 12,274 of 12,773 (oldest ~4% benign traffic trimmed) |
 | Citations verified against real lines | **7 / 7** |
 | `earliest_discovery` vs archive manifest | exact match (`2026-10-23T16:43:00Z`) |
@@ -312,6 +333,7 @@ no ticket correlation, no patching), not a strawman.
 | C · approved maintenance | **false alarm** | `BENIGN_AUTHORIZED`, zero actions |
 | Recall (A + B) | **50%** | **100%** |
 | False positives on C | **100%** | **0%** |
+| Mode | — | `in-process` · mock LLM |
 
 Full reasoning and caveats: [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
 

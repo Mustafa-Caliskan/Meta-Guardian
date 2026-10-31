@@ -65,6 +65,14 @@ services:
       DEMO_ATTACKER_IP: ${DEMO_ATTACKER_IP:-203.0.113.66}
       ATTACK_COOLDOWN_SECONDS: ${ATTACK_COOLDOWN_SECONDS:-10}
       PERSIST_INCIDENTS: "1"
+      # Control-plane auth. Empty in local demo => auth disabled, and /api/config
+      # says so. Set it to require a bearer token everywhere.
+      MG_COCKPIT_TOKEN: ${MG_COCKPIT_TOKEN:-}
+      # Comma-separated management CIDRs. Empty means every non-loopback origin
+      # is treated as remote.
+      MG_MANAGEMENT_NETWORKS: ${MG_MANAGEMENT_NETWORKS:-}
+      # Raw frame retention (days); 0 disables the sweep.
+      MG_FRAME_RETENTION_DAYS: ${MG_FRAME_RETENTION_DAYS:-7}
       # No camera inside the container: presence stays "unknown" and the policy
       # gate downgrades any ghost claim to human approval. Calibrate on the host.
       BASELINE_FRAME: /app/data/scenarios/diff_pair/baseline.png

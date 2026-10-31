@@ -4,6 +4,18 @@ Takvim: 1 Kasım akşamı FEATURE FREEZE. Teslim 4 Kasım 16:00 TR.
 Test: `python -m pytest -q` — her görev sonunda TAMAMEN yeşil + TEK commit.
 Durma kuralı: süre %50 aşarsa dur, yarım iş commit edilmez, raporla.
 
+> **FEATURE FREEZE (31 Ekim 2026).** Sekiz görevin tamamı kapandı. Bundan sonra
+> yalnızca uçtan uca (E2E) doğrulamadan çıkan hata düzeltmeleri commit edilir;
+> yeni özellik, yeni senaryo ve yeni bağımlılık eklenmez. Kapsam dışı listesi
+> aynen geçerlidir.
+>
+> Freeze sonrası yapılan iki düzeltme bu kuralın kapsamındadır (ikisi de Docker
+> E2E'de bulundu): `trigger_attack.py` artık `TRUST_FORWARDED_FOR=1` iken kokpitin
+> `fire_attack`'i gibi demo saldırgan IP'sini gönderiyor (yoksa kaynak loopback
+> olduğu için hiçbir aksiyon önerilmiyordu), ve `benchmark_baseline.py` senaryo
+> C'nin olaylarına oturum kimliği ekledi (bilet sahibi eşleşmeyince C
+> `BENIGN_AUTHORIZED` yerine `BENIGN_UNKNOWN` çıkıyordu).
+
 ## Ortak kurallar
 - Yeni bağımlılık YOK (stdlib + mevcut requirements.txt).
 - Donmuş: `backend/edge/correlator.py`, OODA/forensics prompt ŞABLONLARI (metinleri),

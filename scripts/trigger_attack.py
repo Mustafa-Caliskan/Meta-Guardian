@@ -202,11 +202,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.usb:
         drop_usb_payload(args.usb)
 
+    xff = args.xff
+    if xff is None and getattr(settings, "trust_forwarded_for", False):
+        # Mirrors the cockpit's fire_attack: when the deployment opted into
+        # trusting X-Forwarded-For, the demo attacker IP is used so the gateway
+        # has a blockable, non-infrastructure address. Without this the only
+        # source is the container/host address, which is protected and therefore
+        # never blocked, and the run ends with "no containment action proposed".
+        xff = settings.demo_attacker_ip
+        print(f"[attack] using X-Forwarded-For {xff} (TRUST_FORWARDED_FOR=1)")
+
     statuses: list[int] = []
     if args.exfil:
-        statuses.append(send_exfil(target, args.xff))
+        statuses.append(send_exfil(target, xff))
     if args.admin:
-        statuses.append(send_admin(target, args.xff))
+        statuses.append(send_admin(target, xff))
 
     if args.watch:
         print(f"[watch] waiting up to {args.timeout:.0f}s for a new incident…")

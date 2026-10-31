@@ -149,6 +149,9 @@ def build_scenarios(workspace: Path) -> list[Scenario]:
         {
             "ip": "203.0.113.66",
             "session": "session-7f3a9c",
+            "session_owner": "ops-admin",
+            "session_role": "admin",
+            "session_origin_ip": "10.0.0.31",
             "method": "GET",
             "path": "/api/v1/ops/data",
             "query": "aircraft=ALL&limit=99999",
@@ -163,6 +166,9 @@ def build_scenarios(workspace: Path) -> list[Scenario]:
         {
             "ip": "203.0.113.66",
             "session": "session-7f3a9c",
+            "session_owner": "ops-admin",
+            "session_role": "admin",
+            "session_origin_ip": "10.0.0.31",
             "method": "POST",
             "path": "/api/v1/admin/command",
             "status": 200,
@@ -304,7 +310,9 @@ def _ticket_path(tmp_path: Path, scenario: Scenario) -> Path:
             "tickets": [
                 {
                     "ticket_id": "CHG-BENCH-1",
-                    "operator": "mustafa",
+                    # Must match the identity that ran the action: a ticket only
+                    # suppresses the alert for its own owner and admin role.
+                    "operator": "ops-admin",
                     "reason": "approved maintenance window",
                     "window_start": (now.replace(microsecond=0)).isoformat(),
                     "window_end": now.replace(microsecond=0).isoformat(),
