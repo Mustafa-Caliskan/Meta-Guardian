@@ -12,13 +12,141 @@ report says unknown.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .models import Incident, IncidentStatus, PolicyMode
+from .models import Incident, IncidentStatus, PolicyMode, utc_now
 
 SCHEMA_VERSION = "1.0"
+LEDGER_FILENAME = "hashchain.jsonl"
+
+
+def canonical_incident_json(incident: Incident) -> str:
+    """Deterministic JSON of the stored incident.
+
+    Sorted keys and fixed separators mean the same incident always hashes the
+    same way, on any machine. Frames are referenced by path only, never embedded,
+    so deleting an expired frame does not invalidate the record of the incident.
+    """
+    payload = incident.model_dump(mode="json")
+    return json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+
+
+def incident_content_hash(incident: Incident) -> str:
+    return hashlib.sha256(
+        canonical_incident_json(incident).encode("utf-8")
+    ).hexdigest()
+
+
+class IncidentLedger:
+    """Append-only hash chain over every persisted incident revision.
+
+    The chain is written from ``_persist``, not from case-file rendering: an
+    approval legitimately mutates the incident, so hashing at export time would
+    report a false "tampered" on the next read. Every write appends a new row
+    whose ``prev_sha256`` is the previous row's content hash.
+    """
+
+    def __init__(self, path: Path | str) -> None:
+        self.path = Path(path)
+
+    def _read(self) -> list[tuple[int, dict[str, Any]]]:
+        if not self.path.is_file():
+            return []
+        records: list[tuple[int, dict[str, Any]]] = []
+        for lineno, line in enumerate(
+            self.path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            if not line.strip():
+                continue
+            records.append((lineno, json.loads(line)))
+        return records
+
+    def append(self, incident: Incident, *, kind: str | None = None) -> dict[str, Any]:
+        try:
+            records = self._read()
+        except (OSError, json.JSONDecodeError):
+            records = []
+        previous = records[-1][1].get("content_sha256", "") if records else ""
+        if kind is None:
+            seen = any(rec.get("incident_id") == incident.id for _, rec in records)
+            kind = "updated" if seen else "created"
+        entry = {
+            "incident_id": incident.id,
+            "content_sha256": incident_content_hash(incident),
+            "prev_sha256": previous,
+            "recorded_at": utc_now().isoformat(),
+            "kind": kind,
+        }
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(entry, sort_keys=True, ensure_ascii=False) + "\n"
+                )
+        except OSError:
+            return entry
+        return entry
+
+    def verify(self, incident: Incident) -> dict[str, Any]:
+        """Compare the current incident against its last ledger row.
+
+        ``chain_valid`` is ``None`` when there is nothing to verify against (the
+        incident was never persisted, or persistence is disabled). Reporting
+        "not recorded" is honest; reporting "tampered" would not be.
+        """
+        result: dict[str, Any] = {
+            "chain_valid": None,
+            "expected_sha256": None,
+            "actual_sha256": incident_content_hash(incident),
+            "records": 0,
+            "broken_at_line": None,
+            "broken_reason": "",
+        }
+        if not self.path.is_file():
+            result["broken_reason"] = "no integrity ledger on disk"
+            return result
+
+        try:
+            records = self._read()
+        except (OSError, json.JSONDecodeError) as exc:
+            result["chain_valid"] = False
+            result["broken_reason"] = f"ledger is unreadable: {exc}"
+            return result
+
+        result["records"] = len(records)
+        previous = ""
+        for lineno, record in records:
+            if record.get("prev_sha256", "") != previous:
+                result["chain_valid"] = False
+                result["broken_at_line"] = lineno
+                result["broken_reason"] = f"ledger link broken at line {lineno}"
+                return result
+            previous = record.get("content_sha256", "")
+
+        mine = [
+            (lineno, record)
+            for lineno, record in records
+            if record.get("incident_id") == incident.id
+        ]
+        if not mine:
+            result["broken_reason"] = "no ledger record for this incident"
+            return result
+
+        lineno, last = mine[-1]
+        result["expected_sha256"] = last.get("content_sha256")
+        result["chain_valid"] = result["expected_sha256"] == result["actual_sha256"]
+        if not result["chain_valid"]:
+            result["broken_at_line"] = lineno
+            result["broken_reason"] = (
+                "incident content differs from the last recorded hash"
+            )
+        return result
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -101,7 +229,9 @@ def _human_decision(incident: Incident) -> dict[str, Any] | None:
     }
 
 
-def build_casefile(incident: Incident) -> dict[str, Any]:
+def build_casefile(
+    incident: Incident, *, integrity: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Canonical dict used by both the JSON response and the Markdown renderer."""
     decision = incident.decision
     policy = incident.policy
@@ -245,6 +375,7 @@ def build_casefile(incident: Incident) -> dict[str, Any]:
             else None
         ),
         "human_decision": _human_decision(incident),
+        "integrity": integrity,
         "mcp_actions": actions,
         "forensics": (
             {
@@ -506,6 +637,30 @@ def render_markdown(casefile: dict[str, Any]) -> str:
     else:
         lines += ["_No patch was applied to this incident._", ""]
 
+    lines += ["## Integrity", ""]
+    integrity = casefile.get("integrity")
+    if integrity:
+        valid = integrity.get("chain_valid")
+        if valid is True:
+            verdict = "verified"
+        elif valid is False:
+            verdict = "BROKEN"
+        else:
+            verdict = "not recorded (no ledger entry)"
+        lines += [
+            "| Field | Value |",
+            "|---|---|",
+            f"| Verdict | `{_cell(verdict)}` |",
+            f"| Content SHA-256 | `{_cell(integrity.get('actual_sha256'))}` |",
+            f"| Recorded SHA-256 | `{_cell(integrity.get('expected_sha256'))}` |",
+            f"| Ledger rows | {_cell(integrity.get('records'))} |",
+            f"| Broken at ledger line | {_cell(integrity.get('broken_at_line'))} |",
+            f"| Note | {_cell(integrity.get('broken_reason') or 'n/a')} |",
+            "",
+        ]
+    else:
+        lines += ["_No integrity ledger check was performed for this export._", ""]
+
     lines += [
         "---",
         "",
@@ -523,8 +678,12 @@ def casefile_filename(incident: Incident, fmt: str) -> str:
 
 __all__ = [
     "SCHEMA_VERSION",
+    "LEDGER_FILENAME",
+    "IncidentLedger",
     "build_casefile",
+    "canonical_incident_json",
     "casefile_filename",
+    "incident_content_hash",
     "incident_timings",
     "render_markdown",
 ]

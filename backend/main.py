@@ -30,7 +30,13 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .casefile import build_casefile, casefile_filename, render_markdown
+from .casefile import (
+    LEDGER_FILENAME,
+    IncidentLedger,
+    build_casefile,
+    casefile_filename,
+    render_markdown,
+)
 from .config import PROJECT_ROOT, SCENARIOS_DIR, Settings, get_settings
 from .cloud.forensics import ForensicsEngine
 from .cloud.patcher import Patcher
@@ -122,6 +128,7 @@ class AppState:
         self.scenarios_dir = Path(scenarios_dir or SCENARIOS_DIR)
         self.frame_provider = frame_provider
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        self.ledger = IncidentLedger(self.runtime_dir / LEDGER_FILENAME)
 
         self.bus = EventBus(history_size=MAX_EVENT_HISTORY)
         self.connections = ConnectionManager()
@@ -703,6 +710,10 @@ class AppState:
             path.write_text(
                 incident.model_dump_json(indent=2), encoding="utf-8"
             )
+            # Append-only hash chain: every revision (created, updated, approved)
+            # gets its own row, so a later legitimate change never looks like
+            # tampering while an out-of-band edit of the file does.
+            self.ledger.append(incident)
         except OSError as exc:
             self._log_vision_error(incident.id, "persist", exc)
 
@@ -1191,7 +1202,9 @@ def create_app(
         return incident.model_dump(mode="json")
 
     @app.get("/api/incidents/{incident_id}/casefile", dependencies=[Depends(require_cockpit_auth)])
-    async def incident_casefile(incident_id: str, format: str = "markdown"):
+    async def incident_casefile(
+        incident_id: str, format: str = "markdown", verify: int = 0
+    ):
         incident = state.incidents.get(incident_id)
         if incident is None:
             raise HTTPException(status_code=404, detail="incident not found")
@@ -1202,16 +1215,39 @@ def create_app(
                 status_code=422, detail="format must be markdown or json"
             )
 
-        document = build_casefile(incident)
+        # Verify the record as it exists on disk, not the live object: that is the
+        # artefact a reviewer would open, and an out-of-band edit must be visible
+        # immediately rather than after a restart.
+        record = incident
+        persisted = state.settings.incidents_dir / f"{incident.id}.json"
+        if persisted.is_file():
+            try:
+                record = Incident.model_validate_json(
+                    persisted.read_text(encoding="utf-8")
+                )
+            except Exception:  # noqa: BLE001 - unreadable file is a broken record
+                record = incident
+        integrity = state.ledger.verify(record)
+        document = build_casefile(incident, integrity=integrity)
         filename = casefile_filename(incident, "json" if fmt == "json" else "markdown")
-        disposition = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        if verify:
+            # Explicit check requested: surface the verdict in the headers too so
+            # a script can verify without parsing the document.
+            headers["X-Integrity-Chain"] = (
+                "valid"
+                if integrity["chain_valid"] is True
+                else "broken"
+                if integrity["chain_valid"] is False
+                else "not-recorded"
+            )
 
         if fmt == "json":
-            return JSONResponse(content=document, headers=disposition)
+            return JSONResponse(content=document, headers=headers)
         return PlainTextResponse(
             render_markdown(document),
             media_type="text/markdown; charset=utf-8",
-            headers=disposition,
+            headers=headers,
         )
 
     @app.get("/api/incidents/{incident_id}/frame", dependencies=[Depends(require_cockpit_auth)])

@@ -213,9 +213,13 @@ incidents on screen, not typed in. Hover the badge and mention
 
 **Camera tamper (10 s, optional).** Cover the lens with your hand while a
 privileged command runs (`python scripts/trigger_attack.py --admin --watch`).
-Expect an amber `CAMERA TAMPERED` badge, the banner `CAMERA TAMPERED ? FAIL-CLOSED`,
+Expect an amber `CAMERA TAMPERED` badge, the banner `CAMERA TAMPERED · FAIL-CLOSED`,
 policy mode `approval`, and zero executed actions. Say: "blinding the sensor does
 not hide the attack, it just moves the decision to a human."
+
+**Meşru uzaktan IT (row 1) notu.** Meşru uzaktan IT senaryosu (row 1) için
+`.env` dosyasına `MG_MANAGEMENT_NETWORKS=10.0.0.0/8` eklenmelidir; default boş
+olduğu için `10.0.0.31` "remote" sayılır ve senaryo `BENIGN_AUTHORIZED` gösteremez.
 
 **SAM provenance (10 s).** In the evidence card hover the mask. The method line
 must read `baseline_diff->sam-vit_b@modal` (or `->sam-3.1`). If it reads

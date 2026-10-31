@@ -373,3 +373,203 @@ def test_casefile_reflects_patch_after_it_runs(tmp_path: Path):
         ).text
         assert "200 → 403" in markdown
         assert "PATCH VERIFIED" in markdown
+
+
+# ------------------------------------------------------- task 5: hash ledger
+
+from backend.casefile import (  # noqa: E402
+    IncidentLedger,
+    canonical_incident_json,
+    incident_content_hash,
+)
+
+
+def build_persisted_state(tmp_path: Path) -> AppState:
+    settings = Settings(
+        mode=LLMMode.MOCK,
+        target_port=1,
+        fixtures_dir=tmp_path / "fixtures",
+        runtime_dir=tmp_path / "runtime",
+        quarantine_dir=tmp_path / "quarantine",
+        change_tickets_path=tmp_path / "tickets.json",
+        persist_incidents=True,
+        segmentation_async=False,
+    )
+    settings.ensure_dirs()
+    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+    return AppState(
+        settings=settings,
+        mcp=FakeMCP(),
+        enable_watchers=False,
+        runtime_dir=tmp_path / "runtime",
+        scenarios_dir=tmp_path / "scenarios",
+        frame_provider=lambda: frame.copy(),
+    )
+
+
+def _rows(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_content_hash_is_deterministic_and_content_sensitive():
+    incident = _incident()
+    assert canonical_incident_json(incident) == canonical_incident_json(incident)
+    assert incident_content_hash(incident) == incident_content_hash(
+        incident.model_copy(deep=True)
+    )
+
+    edited = incident.model_copy(deep=True)
+    edited.decision.reasoning = "quietly rewritten"
+    assert incident_content_hash(edited) != incident_content_hash(incident)
+
+
+def test_simulate_writes_the_ledger_and_verifies(tmp_path: Path):
+    state = build_persisted_state(tmp_path)
+    with TestClient(create_app(state)) as client:
+        incident = client.post("/api/simulate", json={"scenario": "A"}).json()
+
+        assert state.ledger.path.is_file()
+        rows = _rows(state.ledger.path)
+        assert rows[0]["incident_id"] == incident["id"]
+        assert rows[0]["kind"] == "created"
+        assert rows[0]["prev_sha256"] == ""
+
+        response = client.get(
+            f"/api/incidents/{incident['id']}/casefile?format=json&verify=1"
+        )
+        body = response.json()
+        assert body["integrity"]["chain_valid"] is True
+        assert body["integrity"]["expected_sha256"] == body["integrity"]["actual_sha256"]
+        assert response.headers["x-integrity-chain"] == "valid"
+
+
+def test_approval_appends_a_new_row_and_keeps_the_chain_valid(tmp_path: Path):
+    state = build_persisted_state(tmp_path)
+    incident = _incident()
+    incident.policy = PolicyOutcome(
+        classification=Classification.CREDENTIAL_MISUSE,
+        severity=Severity.CRITICAL,
+        confidence=0.9,
+        mode=PolicyMode.APPROVAL,
+        pending_actions=[
+            MCPAction(action=ActionType.BLOCK_IP_ON_GATEWAY, target="203.0.113.66")
+        ],
+    )
+    incident.status = IncidentStatus.OPEN
+    state._remember(incident)
+    before = len(_rows(state.ledger.path))
+
+    with TestClient(create_app(state)) as client:
+        response = client.post(f"/api/incidents/{incident.id}/approve")
+        assert response.status_code == 200
+
+        rows = _rows(state.ledger.path)
+        assert len(rows) == before + 1
+        assert rows[-1]["kind"] == "updated"
+        assert rows[-1]["prev_sha256"] == rows[-2]["content_sha256"]
+
+        check = client.get(
+            f"/api/incidents/{incident.id}/casefile?format=json&verify=1"
+        ).json()
+        assert check["integrity"]["chain_valid"] is True
+        assert check["human_decision"]["action"] == "approved"
+
+
+def test_reject_also_keeps_the_chain_valid(tmp_path: Path):
+    state = build_persisted_state(tmp_path)
+    incident = _incident()
+    incident.policy = PolicyOutcome(
+        classification=Classification.THREAT_CRITICAL,
+        severity=Severity.CRITICAL,
+        confidence=0.7,
+        mode=PolicyMode.APPROVAL,
+        pending_actions=[
+            MCPAction(action=ActionType.BLOCK_IP_ON_GATEWAY, target="203.0.113.66")
+        ],
+    )
+    state._remember(incident)
+
+    with TestClient(create_app(state)) as client:
+        assert client.post(
+            f"/api/incidents/{incident.id}/reject", json={"reason": "false positive"}
+        ).status_code == 200
+        check = client.get(
+            f"/api/incidents/{incident.id}/casefile?format=json&verify=1"
+        ).json()
+        assert check["integrity"]["chain_valid"] is True
+
+
+def test_editing_the_persisted_incident_breaks_the_chain(tmp_path: Path):
+    state = build_persisted_state(tmp_path)
+    with TestClient(create_app(state)) as client:
+        incident = client.post("/api/simulate", json={"scenario": "A"}).json()
+        path = state.settings.incidents_dir / f"{incident['id']}.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["decision"]["reasoning"] = "quietly rewritten"
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        response = client.get(
+            f"/api/incidents/{incident['id']}/casefile?format=json&verify=1"
+        )
+        integrity = response.json()["integrity"]
+        assert integrity["chain_valid"] is False
+        assert integrity["broken_at_line"] == 1
+        assert "differs" in integrity["broken_reason"]
+        assert response.headers["x-integrity-chain"] == "broken"
+
+
+def test_deleting_a_frame_does_not_invalidate_the_record(tmp_path: Path):
+    state = build_persisted_state(tmp_path)
+    with TestClient(create_app(state)) as client:
+        incident = client.post("/api/simulate", json={"scenario": "A"}).json()
+        frame = state.frame_path(incident["id"])
+        assert frame is not None and frame.exists()
+        frame.unlink()
+
+        check = client.get(
+            f"/api/incidents/{incident['id']}/casefile?format=json&verify=1"
+        ).json()
+        assert check["integrity"]["chain_valid"] is True
+
+
+def test_tampering_with_a_middle_ledger_row_is_detected(tmp_path: Path):
+    ledger = IncidentLedger(tmp_path / "hashchain.jsonl")
+    first = _incident()
+    second = _incident()
+    ledger.append(first)
+    ledger.append(second)
+
+    lines = ledger.path.read_text(encoding="utf-8").splitlines()
+    record = json.loads(lines[0])
+    record["content_sha256"] = "0" * 64
+    lines[0] = json.dumps(record, sort_keys=True)
+    ledger.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    result = ledger.verify(second)
+    assert result["chain_valid"] is False
+    assert result["broken_at_line"] == 2
+    assert "link broken" in result["broken_reason"]
+
+
+def test_verify_without_a_ledger_reports_not_recorded(tmp_path: Path):
+    ledger = IncidentLedger(tmp_path / "missing.jsonl")
+    result = ledger.verify(_incident())
+    assert result["chain_valid"] is None
+    assert "no integrity ledger" in result["broken_reason"]
+
+
+def test_markdown_renders_the_integrity_section():
+    document = build_casefile(
+        _incident(),
+        integrity={
+            "chain_valid": True,
+            "actual_sha256": "a" * 64,
+            "expected_sha256": "a" * 64,
+            "records": 1,
+            "broken_at_line": None,
+            "broken_reason": "",
+        },
+    )
+    markdown = render_markdown(document)
+    assert "## Integrity" in markdown
+    assert "verified" in markdown
