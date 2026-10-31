@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .models import Incident, IncidentStatus, PolicyMode, utc_now
+from .models import (Incident, IncidentStatus, PolicyMode, utc_now)
 
 SCHEMA_VERSION = "1.0"
 LEDGER_FILENAME = "hashchain.jsonl"
@@ -294,6 +294,7 @@ def build_casefile(
 
     return {
         "schema_version": SCHEMA_VERSION,
+        "attack_techniques": incident.attack_techniques,
         "incident": {
             "id": incident.id,
             "scenario": incident.scenario,
@@ -519,6 +520,21 @@ def render_markdown(casefile: dict[str, Any]) -> str:
             lines.append("")
     else:
         lines += ["_No decision recorded._", ""]
+
+    lines += ["## MITRE ATT&CK", ""]
+    techniques = casefile.get("attack_techniques") or []
+    if techniques:
+        lines += ["| Technique | Name |", "|---|---|"]
+        for technique in techniques:
+            lines.append(f"| `{_cell(technique['id'])}` | {_cell(technique['name'])} |")
+        lines += [
+            "",
+            "_Techniques describe the activity in this incident. For a benign verdict "
+            "they are the activity that was evaluated and cleared, not a confirmed attack._",
+            "",
+        ]
+    else:
+        lines += ["_No technique mapped._", ""]
 
     lines += ["## Policy gate", ""]
     if policy:

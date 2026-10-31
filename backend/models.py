@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 
 def utc_now() -> datetime:
@@ -307,6 +307,18 @@ class Incident(BaseModel):
     decided_at: datetime | None = None
     decision_note: str = ""
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def attack_techniques(self) -> list[dict[str, str]]:
+        """Derived ATT&CK mapping, so the cockpit and case file agree."""
+        return attack_technique_labels(
+            attack_techniques(
+                self.decision.classification if self.decision else None,
+                self.events,
+                [result.action for result in self.action_results],
+            )
+        )
+
     def touch(self) -> "Incident":
         self.updated_at = utc_now()
         return self
@@ -355,3 +367,86 @@ class MetricsReport(BaseModel):
     full_archive_input_tokens: int | None = None
     full_archive_model: str | None = None
     generated_at: datetime = Field(default_factory=utc_now)
+
+# ------------------------------------------------------- task 8: ATT&CK ----
+
+# MITRE ATT&CK technique identifiers used by the demo. Kept as plain constants
+# so the mapping is auditable and needs no new dependency.
+T1078 = "T1078"  # Valid Accounts
+T1200 = "T1200"  # Hardware Additions
+T1567 = "T1567"  # Exfiltration Over Web Service
+T1489 = "T1489"  # Service Stop
+
+ATTACK_TECHNIQUE_NAMES: dict[str, str] = {
+    T1078: "Valid Accounts",
+    T1200: "Hardware Additions",
+    T1567: "Exfiltration Over Web Service",
+    T1489: "Service Stop",
+}
+
+# Default technique per verdict, used when no event supplies a stronger signal.
+# For BENIGN_* verdicts the list describes the activity that was evaluated and
+# cleared, not a confirmed intrusion; the case file labels it "observed".
+CLASSIFICATION_TECHNIQUES: dict[Classification, tuple[str, ...]] = {
+    Classification.GHOST_ATTACK: (T1078,),
+    Classification.CREDENTIAL_MISUSE: (T1078,),
+    Classification.THREAT_CRITICAL: (T1200,),
+    Classification.BENIGN_AUTHORIZED: (T1200,),
+    Classification.BENIGN_UNKNOWN: (T1200,),
+}
+
+
+def attack_techniques(
+    classification: Classification | None,
+    events: list[SecurityEvent] | None = None,
+    action_types: list[ActionType] | None = None,
+) -> list[str]:
+    """Map an incident to MITRE ATT&CK techniques.
+
+    Event-driven signals win because they are grounded in what actually arrived;
+    the verdict then adds its own technique (a hijacked token is T1078 even if
+    the request looked like a plain API call). The result is never empty, so the
+    case file always shows at least one technique for the activity it describes.
+    """
+    found: list[str] = []
+
+    def add(technique: str) -> None:
+        if technique not in found:
+            found.append(technique)
+
+    for event in events or []:
+        payload = event.payload or {}
+        if event.type is EventType.USB_INSERTED:
+            add(T1200)
+        elif event.type is EventType.SUSPICIOUS_API_REQUEST:
+            text = " ".join(
+                str(payload.get(key, "")) for key in ("path", "query", "summary")
+            ).lower()
+            if any(
+                marker in text
+                for marker in ("aircraft=all", "limit=99999", "export=all", "dump=true")
+            ) or str(payload.get("status")) == "200":
+                add(T1567)
+            else:
+                add(T1567)
+        elif event.type is EventType.UNAUTHORIZED_PROCESS:
+            add(T1489)
+
+    for action in action_types or []:
+        if action is ActionType.KILL_PROCESS:
+            add(T1489)
+
+    if classification is not None:
+        for technique in CLASSIFICATION_TECHNIQUES.get(classification, ()):
+            add(technique)
+
+    if not found:
+        add(T1200)
+    return found
+
+
+def attack_technique_labels(techniques: list[str]) -> list[dict[str, str]]:
+    return [
+        {"id": technique, "name": ATTACK_TECHNIQUE_NAMES.get(technique, "unknown")}
+        for technique in techniques
+    ]

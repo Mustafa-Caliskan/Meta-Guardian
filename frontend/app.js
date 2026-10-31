@@ -541,6 +541,7 @@
           ${policy.session && policy.session.origin_ip ? `<span class="pill warn">origin ${esc(policy.session.origin_ip)}</span>` : ""}
           ${incident.vision && incident.vision.tampered ? '<span class="pill warn">CAMERA TAMPERED</span>' : ""}
           ${decision.model === "fallback" ? '<span class="pill warn" title="The model was unavailable: this verdict came from the deterministic fallback.">DEGRADED · fallback</span>' : ""}
+          ${(incident.attack_techniques || []).map((t) => `<span class="pill" title="${esc(t.name || "")}">${esc(t.id || "")}</span>`).join("")}
           ${incident.forensics ? `<span class="pill ${incident.forensics.citations_verified ? "ok" : "warn"}">forensics ${incident.forensics.citations_verified ? "verified" : "unverified"}</span>` : ""}
           ${incident.patch ? `<span class="pill ${incident.patch.verified ? "ok" : "bad"}">patch ${incident.patch.verified ? "200 → 403" : "failed"}</span>` : ""}
         </div>

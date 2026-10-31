@@ -200,3 +200,20 @@ not recompute the past (out-of-band file changes, a tampered middle row). It
 does **not** protect against an attacker who can rewrite the entire chain: there
 is no cryptographic signature and no notarisation. The defensible claim is
 **change detection**, not "tamper-proof".
+
+## 9. MITRE ATT&CK mapping
+
+Derived deterministically from the evidence in `backend/models.py` (no model
+call), so the console, the case file and the cockpit always agree.
+
+| Classification / event | Technique | Name |
+|---|---|---|
+| `GHOST_ATTACK` | `T1078` | Valid Accounts |
+| `CREDENTIAL_MISUSE` | `T1078` | Valid Accounts |
+| USB insertion (`usb_inserted`) | `T1200` | Hardware Additions |
+| Exfiltration request (`suspicious_api_request`) | `T1567` | Exfiltration Over Web Service |
+| `kill_process` action / `unauthorized_process` | `T1489` | Service Stop |
+
+For a benign verdict the listed technique is the activity that was evaluated and
+cleared, not a confirmed intrusion. Every classification returns at least one
+technique, so every case file carries an ATT&CK reference.
