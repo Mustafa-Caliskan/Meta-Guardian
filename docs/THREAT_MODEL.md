@@ -24,8 +24,14 @@ Trust boundaries:
                                      +--MCP actions--> [ target service ] <+
 ```
 
-- Camera frames **never** leave the host. Only a text description, a boolean
-  `operator_present`, a confidence value and a cropped ROI hash are sent.
+- The camera frame is **not** sent to the LLM. It is analysed locally for presence
+  and, when a segmenter is reachable, sent to the segmentation endpoint (Modal or
+  Meta `sam-3.1`) to produce a mask. Only a text description, a boolean
+  `operator_present`, a confidence value and the ROI reach the decision model.
+- Raw frames are **deleted automatically** after `MG_FRAME_RETENTION_DAYS`
+  (default 7; `0` disables the sweep). The mask, the SHA-256 receipt and the hash
+  ledger are kept, so the case file remains verifiable without the footage.
+
 - API keys stay in `.env`; `.env` is git-ignored; smoke tests never print keys.
 - The LLM may only select a **pre-approved patch template and bounded
   parameters**. It never emits executable code that is run directly.

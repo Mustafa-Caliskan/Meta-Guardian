@@ -123,6 +123,9 @@ class Settings:
     segmentation_async: bool = True
     baseline_frame: str = ""
     persist_incidents: bool = True
+    # Raw camera frames are deleted after this many days. Masks and hashes stay,
+    # so the case file remains verifiable after the footage is gone.
+    frame_retention_days: int = 7
 
     trust_forwarded_for: bool = False
     demo_attacker_ip: str = "203.0.113.66"
@@ -252,6 +255,7 @@ def get_settings() -> Settings:
         segmentation_async=_env("SEGMENTATION_ASYNC", "1") not in ("0", "false", "False"),
         baseline_frame=_env("BASELINE_FRAME", ""),
         persist_incidents=_env("PERSIST_INCIDENTS", "1") not in ("0", "false", "False"),
+        frame_retention_days=_env_int("MG_FRAME_RETENTION_DAYS", 7),
         trust_forwarded_for=_env("TRUST_FORWARDED_FOR", "0") in ("1", "true", "True"),
         demo_attacker_ip=_env("DEMO_ATTACKER_IP", "203.0.113.66"),
         attack_cooldown_seconds=_env_float("ATTACK_COOLDOWN_SECONDS", 10.0),

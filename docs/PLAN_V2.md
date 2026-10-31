@@ -22,7 +22,7 @@ Durma kuralı: süre %50 aşarsa dur, yarım iş commit edilmez, raporla.
 | 4 | A2: Konsol çakışması / CREDENTIAL_MISUSE | ✅ |
 | 5 | A3: Append-only hash ledger | ✅ |
 | 6 | S3-lite: Deterministik fallback (fail-open kapat) | ✅ |
-| 7 | S5: Kare saklama süresi | ☐ (~1 saat) |
+| 7 | S5: Kare saklama süresi | ✅ |
 | 8 | A4: ATT&CK eşlemesi | ☐ (~45 dk) |
 
 ## Görev 4 — A2: CREDENTIAL_MISUSE (~3 saat, durma kuralı aktif)

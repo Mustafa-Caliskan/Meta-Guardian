@@ -28,6 +28,12 @@ to a read-only vault, the attacker IP is blocked at the gateway, the session is 
 the agent proves the fix instead of asserting it: it replays the same attack and requires
 `HTTP 200` to become `HTTP 403`, rolling back automatically if it does not.
 
+**Data flow for the camera frame.** The frame is used for local presence analysis and, when a
+segmenter is reachable, sent to the segmentation endpoint (Modal or Meta `sam-3.1`). It is
+never sent to the LLM. Raw frames are deleted automatically after `MG_FRAME_RETENTION_DAYS`
+(default 7; `0` disables the sweep); what persists is the mask and the SHA-256 hash, so the
+case file stays verifiable after the footage is gone.
+
 ## What is proven, and how
 
 Every claim below is reproducible from this repository, with the command next to it.

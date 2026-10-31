@@ -221,6 +221,12 @@ not hide the attack, it just moves the decision to a human."
 `.env` dosyasına `MG_MANAGEMENT_NETWORKS=10.0.0.0/8` eklenmelidir; default boş
 olduğu için `10.0.0.31` "remote" sayılır ve senaryo `BENIGN_AUTHORIZED` gösteremez.
 
+**DEGRADED gösterimi (opsiyonel, 20 s).** Rozeti göstermek için: `.env` içinde
+`LLM_MODE=live` + bilerek geçersiz bir `MODEL_API_KEY` ile başlat, exfil tetikle
+→ `DEGRADED · fallback` rozeti + `APPROVAL` görünür (model ölse bile tespit ve
+insan onayı çalışır). Mock modda model asla düşmez; rozetin normal demoda
+görünmemesi doğru davranıştır.
+
 **SAM provenance (10 s).** In the evidence card hover the mask. The method line
 must read `baseline_diff->sam-vit_b@modal` (or `->sam-3.1`). If it reads
 `sam-offline`, the Modal endpoint is not configured and the mask is geometry ?

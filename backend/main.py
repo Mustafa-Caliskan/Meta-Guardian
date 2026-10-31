@@ -164,6 +164,7 @@ class AppState:
         self._pipeline_lock = asyncio.Lock()
         self._bus_subscribed = False
         self._flush_task: asyncio.Task | None = None
+        self._retention_task: asyncio.Task | None = None
         self._last_attack_at: float = 0.0
         self._attack_lock = asyncio.Lock()
         self.real_incidents = 0
@@ -182,6 +183,12 @@ class AppState:
             self._tasks = [t for t in (self.usb_watcher._task, self.net_watcher._task) if t]
         if self._flush_task is None or self._flush_task.done():
             self._flush_task = asyncio.create_task(self._flush_loop(), name="correlator-flush")
+        if self._retention_task is None or self._retention_task.done():
+            # Sweep once at startup, then once a day while the app is running.
+            self.purge_expired_frames()
+            self._retention_task = asyncio.create_task(
+                self._frame_retention_loop(), name="frame-retention"
+            )
 
     async def stop(self) -> None:
         await self.usb_watcher.stop()
@@ -189,6 +196,9 @@ class AppState:
         if self._flush_task is not None:
             self._flush_task.cancel()
             self._flush_task = None
+        if self._retention_task is not None:
+            self._retention_task.cancel()
+            self._retention_task = None
         for task in list(self._pipeline_tasks):
             task.cancel()
         self._pipeline_tasks.clear()
@@ -310,6 +320,49 @@ class AppState:
 
     def evidence_dir(self, incident_id: str) -> Path:
         return self.runtime_dir / "evidence" / incident_id
+
+    def purge_expired_frames(
+        self, *, now: float | None = None, retention_days: int | None = None
+    ) -> list[str]:
+        """Delete raw frames older than the retention window.
+
+        Age is decided by the frame file's modification time, not by the incident
+        timestamp: the file is what is actually on disk, it survives restarts, and
+        it can be aged deterministically in tests with ``os.utime``. Masks,
+        receipts and the hash ledger are never touched, so a purged incident still
+        verifies. ``retention_days <= 0`` disables purging entirely.
+        """
+        days = (
+            self.settings.frame_retention_days
+            if retention_days is None
+            else int(retention_days)
+        )
+        if days <= 0:
+            return []
+
+        root = self.runtime_dir / "evidence"
+        if not root.is_dir():
+            return []
+
+        current = time.time() if now is None else now
+        cutoff = current - days * 86400
+        removed: list[str] = []
+        for frame in root.glob("*/frame.png"):
+            try:
+                if frame.stat().st_mtime < cutoff:
+                    frame.unlink()
+                    removed.append(str(frame))
+            except OSError as exc:  # noqa: BLE001 - one bad file must not stop the sweep
+                self._log_vision_error(frame.parent.name, "frame-retention", exc)
+        return removed
+
+    async def _frame_retention_loop(self) -> None:
+        while True:
+            try:
+                self.purge_expired_frames()
+            except Exception as exc:  # noqa: BLE001 - loop must survive
+                self._log_vision_error("frame-retention", "sweep", exc)
+            await asyncio.sleep(86400)
 
     def frame_path(self, incident_id: str) -> Path | None:
         incident = self.incidents.get(incident_id)
@@ -1172,6 +1225,16 @@ def create_app(
             "rate_limit": {
                 "max_actions_per_minute": state.policy.rate_limiter.max_events,
                 "window_seconds": state.policy.rate_limiter.window_seconds,
+            },
+            "data_retention": {
+                "frame_retention_days": state.settings.frame_retention_days,
+                "frames_deleted_after_days": state.settings.frame_retention_days,
+                "masks_and_hashes_retained": True,
+                "note": (
+                    "Raw camera frames are deleted after the retention window. "
+                    "Masks, receipts and the hash ledger are kept, so the case "
+                    "file stays verifiable without the footage."
+                ),
             },
         }
 
