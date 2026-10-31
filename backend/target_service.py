@@ -74,6 +74,16 @@ class GatewayState:
                 "role": "admin",
                 "origin_ip": "10.0.0.31",
             },
+            # The same admin identity, but this session was established from an
+            # external address. It exists so the console-collision demo is honest:
+            # a hijacked token is used from the internet, not from the office LAN.
+            # With MG_MANAGEMENT_NETWORKS set, origin 10.0.0.31 counts as trusted
+            # management traffic, so the misuse demo needs an outside origin.
+            "session-ext-admin": {
+                "operator": "ops-admin",
+                "role": "admin",
+                "origin_ip": "203.0.113.66",
+            },
         }
     )
     rule: WAFRule | None = None
@@ -97,6 +107,11 @@ class GatewayState:
                     "operator": "ops-admin",
                     "role": "admin",
                     "origin_ip": "10.0.0.31",
+                },
+                "session-ext-admin": {
+                    "operator": "ops-admin",
+                    "role": "admin",
+                    "origin_ip": "203.0.113.66",
                 },
             }
             self.rule = None

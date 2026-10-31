@@ -195,3 +195,36 @@ def test_expired_ticket_does_not_authorise_remote_management_work():
     )
 
     assert outcome.classification is not Classification.BENIGN_AUTHORIZED
+
+
+# ----------------------------------- single-env guarantee (freeze fix) ------
+
+def test_single_env_with_management_networks_still_detects_misuse_from_outside():
+    """One .env must run every demo: C, ghost and credential misuse.
+
+    Configuration: MG_MANAGEMENT_NETWORKS=10.0.0.0/8. The hijacked admin session
+    is established from 203.0.113.66, so it stays remote and the console
+    collision is still detected while an operator sits at the desk.
+    """
+    outcome = engine(networks=["10.0.0.0/8"]).evaluate(
+        events=[admin_event(session_origin_ip="203.0.113.66")],
+        proposed=decision(),
+        vision=vision(True),
+        now=utc_now(),
+    )
+
+    assert outcome.classification is Classification.CREDENTIAL_MISUSE
+    assert outcome.mode is PolicyMode.APPROVAL
+
+
+def test_management_origin_is_not_misuse_under_the_same_single_env():
+    """The old trap: an admin session from the office LAN is trusted traffic."""
+    outcome = engine(networks=["10.0.0.0/8"]).evaluate(
+        events=[admin_event(session_origin_ip="10.0.0.31")],
+        proposed=decision(),
+        vision=vision(True),
+        now=utc_now(),
+    )
+
+    assert outcome.classification is Classification.THREAT_CRITICAL
+    assert outcome.mode is PolicyMode.AUTO

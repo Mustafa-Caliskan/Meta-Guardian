@@ -217,9 +217,27 @@ Expect an amber `CAMERA TAMPERED` badge, the banner `CAMERA TAMPERED · FAIL-CLO
 policy mode `approval`, and zero executed actions. Say: "blinding the sensor does
 not hide the attack, it just moves the decision to a human."
 
-**Meşru uzaktan IT (row 1) notu.** Meşru uzaktan IT senaryosu (row 1) için
-`.env` dosyasına `MG_MANAGEMENT_NETWORKS=10.0.0.0/8` eklenmelidir; default boş
-olduğu için `10.0.0.31` "remote" sayılır ve senaryo `BENIGN_AUTHORIZED` gösteremez.
+**Credential misuse / console collision (15 s).** The attacker uses the hijacked
+admin session `session-ext-admin` — the same operator identity, but established
+from an external address — while the camera shows someone at the desk:
+
+```powershell
+python scripts/trigger_attack.py --admin --watch
+```
+
+Expect `CREDENTIAL_MISUSE`, policy mode `approval` (never automatic), an
+`origin 203.0.113.66` pill and the banner `CREDENTIAL MISUSE … approval required`.
+Say: "the audit log looks exactly like the real admin's own work; only the camera
+can tell that the person holding the token is not the person sitting here."
+
+**One `.env` for every scenario.** `MG_MANAGEMENT_NETWORKS=10.0.0.0/8` is safe to
+leave set: the misuse demo uses the externally-established session, so it stays
+"remote". The office-LAN session (`session-7f3a9c`, origin `10.0.0.31`) counts as
+management traffic, which is what the legitimate-remote-IT rule (row 1) needs.
+
+**Not true any more:** scenario C does **not** depend on `MG_MANAGEMENT_NETWORKS`.
+It is suppressed by ticket owner + admin role + a present operator, so it returns
+`BENIGN_AUTHORIZED` with the variable empty as well.
 
 **DEGRADED gösterimi (opsiyonel, 20 s).** Rozeti göstermek için: `.env` içinde
 `LLM_MODE=live` + bilerek geçersiz bir `MODEL_API_KEY` ile başlat, exfil tetikle

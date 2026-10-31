@@ -163,3 +163,39 @@ def test_kill_process_allowlist_permits_listed_names(tmp_path):
 
     assert result.success is True
     assert "evil.exe" in result.detail
+
+
+def test_external_admin_session_is_accepted_and_tagged_remote(client):
+    """The console-collision demo needs an admin session that is not on the LAN.
+
+    ``session-ext-admin`` is the same admin identity established from an external
+    address, so with MG_MANAGEMENT_NETWORKS configured the origin still reads as
+    remote and the policy engine can classify CREDENTIAL_MISUSE.
+    """
+    response = client.post(
+        "/api/v1/admin/command",
+        json={"command": "dump core-db", "target": "ops-core"},
+        headers={"x-session-token": "session-ext-admin"},
+    )
+    assert response.status_code == 200
+
+    entry = json.loads(STATE.log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert entry["session_owner"] == "ops-admin"
+    assert entry["session_role"] == "admin"
+    assert entry["session_origin_ip"] == "203.0.113.66"
+
+
+def test_admin_command_without_a_session_is_rejected(client):
+    response = client.post(
+        "/api/v1/admin/command",
+        json={"command": "dump core-db", "target": "ops-core"},
+    )
+    assert response.status_code == 401
+
+
+def test_trigger_attack_defaults_to_the_external_admin_session():
+    from scripts.trigger_attack import DEFAULT_ADMIN_SESSION
+
+    assert DEFAULT_ADMIN_SESSION in STATE.sessions
+    assert STATE.sessions[DEFAULT_ADMIN_SESSION]["role"] == "admin"
+    assert STATE.sessions[DEFAULT_ADMIN_SESSION]["origin_ip"] == "203.0.113.66"

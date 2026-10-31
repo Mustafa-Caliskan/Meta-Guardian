@@ -76,15 +76,31 @@ def send_exfil(base_url: str, xff: str | None) -> int:
         return response.status_code
 
 
-def send_admin(base_url: str, xff: str | None) -> int:
-    headers = {"x-forwarded-for": xff} if xff else {}
+DEFAULT_ADMIN_SESSION = "session-ext-admin"
+
+
+def send_admin(
+    base_url: str, xff: str | None, session: str = DEFAULT_ADMIN_SESSION
+) -> int:
+    """Execute a privileged command with an admin session token.
+
+    The default token belongs to the externally-established admin session, so the
+    request looks like a hijacked credential used from outside. Without a token
+    the target correctly answers 403 and nothing reaches the SOC pipeline.
+    """
+    headers = {"x-session-token": session}
+    if xff:
+        headers["x-forwarded-for"] = xff
     with _client(base_url) as client:
         response = client.post(
             "/api/v1/admin/command",
             json={"command": "dump core-db", "target": "ops-core"},
             headers=headers,
         )
-        print(f"[attack] POST /api/v1/admin/command -> HTTP {response.status_code}")
+        print(
+            f"[attack] POST /api/v1/admin/command (session {session}) "
+            f"-> HTTP {response.status_code}"
+        )
         return response.status_code
 
 
@@ -180,6 +196,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--control", default=None, help="control center URL")
     parser.add_argument("--exfil", action="store_true", help="send the exfiltration request")
     parser.add_argument("--admin", action="store_true", help="send a privileged admin command")
+    parser.add_argument(
+        "--session",
+        default=DEFAULT_ADMIN_SESSION,
+        help=(
+            "admin session token used by --admin "
+            f"(default {DEFAULT_ADMIN_SESSION} = externally established session)"
+        ),
+    )
     parser.add_argument("--xff", default=None, help="X-Forwarded-For value (proxy trust required)")
     parser.add_argument("--usb", default=None, help="copy a payload onto this mounted drive")
     parser.add_argument("--watch", action="store_true", help="wait for an incident to appear")
@@ -216,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.exfil:
         statuses.append(send_exfil(target, xff))
     if args.admin:
-        statuses.append(send_admin(target, xff))
+        statuses.append(send_admin(target, xff, args.session))
 
     if args.watch:
         print(f"[watch] waiting up to {args.timeout:.0f}s for a new incident…")

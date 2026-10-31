@@ -390,9 +390,9 @@ ATTACK_TECHNIQUE_NAMES: dict[str, str] = {
 CLASSIFICATION_TECHNIQUES: dict[Classification, tuple[str, ...]] = {
     Classification.GHOST_ATTACK: (T1078,),
     Classification.CREDENTIAL_MISUSE: (T1078,),
-    Classification.THREAT_CRITICAL: (T1200,),
-    Classification.BENIGN_AUTHORIZED: (T1200,),
-    Classification.BENIGN_UNKNOWN: (T1200,),
+    Classification.THREAT_CRITICAL: (T1078,),
+    Classification.BENIGN_AUTHORIZED: (T1078,),
+    Classification.BENIGN_UNKNOWN: (T1078,),
 }
 
 
@@ -441,7 +441,10 @@ def attack_techniques(
             add(technique)
 
     if not found:
-        add(T1200)
+        # Last-resort default. T1078 (Valid Accounts) is the honest minimum: the
+        # only thing every incident shares is that some identity acted. Never
+        # T1200 here — claiming a hardware addition with no hardware is wrong.
+        add(T1078)
     return found
 
 

@@ -15,6 +15,16 @@ Durma kuralı: süre %50 aşarsa dur, yarım iş commit edilmez, raporla.
 > olduğu için hiçbir aksiyon önerilmiyordu), ve `benchmark_baseline.py` senaryo
 > C'nin olaylarına oturum kimliği ekledi (bilet sahibi eşleşmeyince C
 > `BENIGN_AUTHORIZED` yerine `BENIGN_UNKNOWN` çıkıyordu).
+>
+> Freeze sonrası iki düzeltme daha (31 Ekim, yanlış etiket + demo akışı):
+> 1. ATT&CK: sınıf-seviyesi `THREAT_CRITICAL`/`BENIGN_*` eşlemesi ve son fallback
+>    `T1200` yerine `T1078` oldu. `T1200` artık yalnızca gerçek USB olayıyla çıkar;
+>    saf ağ olayına "donanım eklemesi" rozeti yanlış etiketti.
+> 2. Demo origin ayrımı: hedef servise `session-ext-admin` eklendi (aynı
+>    `ops-admin` kimliği, origin `203.0.113.66`). `trigger_attack.py --admin`
+>    varsayılan olarak bu oturumu kullanıyor ve oturum belirtecini gönderiyor.
+>    Böylece tek `.env` (`MG_MANAGEMENT_NETWORKS=10.0.0.0/8`) ile senaryo C,
+>    CREDENTIAL_MISUSE, GHOST ve tamper birlikte çalışır; çekimde .env değişimi yok.
 
 ## Ortak kurallar
 - Yeni bağımlılık YOK (stdlib + mevcut requirements.txt).

@@ -51,7 +51,21 @@ def test_every_classification_returns_at_least_one_technique():
 def test_expected_mapping_per_classification():
     assert attack_techniques(Classification.GHOST_ATTACK, [], []) == ["T1078"]
     assert attack_techniques(Classification.CREDENTIAL_MISUSE, [], []) == ["T1078"]
-    assert attack_techniques(Classification.THREAT_CRITICAL, [], []) == ["T1200"]
+    # A verdict alone must never imply hardware: T1200 only comes from a USB event.
+    assert attack_techniques(Classification.THREAT_CRITICAL, [], []) == ["T1078"]
+
+
+def test_network_only_incident_never_claims_hardware_additions():
+    """Regression: a pure exfiltration used to carry a bogus T1200 badge."""
+    techniques = attack_techniques(Classification.THREAT_CRITICAL, [network_event()])
+    assert "T1567" in techniques
+    assert "T1200" not in techniques
+
+
+def test_hardware_additions_only_appears_with_a_real_usb_event():
+    assert "T1200" in attack_techniques(
+        Classification.THREAT_CRITICAL, [usb_event(), network_event()]
+    )
 
 
 def test_usb_event_maps_to_hardware_additions():
