@@ -283,7 +283,11 @@
       let detail = `HTTP ${response.status}`;
       try {
         const body = await response.json();
-        if (body.detail) detail = body.detail;
+        if (body.detail) {
+        detail = typeof body.detail === "object"
+          ? (body.detail.error ? `${body.detail.error} (cooldown ${body.detail.retry_after_seconds || 0}s)` : JSON.stringify(body.detail))
+          : String(body.detail);
+      }
       } catch (_) { /* ignore */ }
       throw new Error(detail);
     }
