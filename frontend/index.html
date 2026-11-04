@@ -4,75 +4,103 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Meta-Guardian — Cyber-Physical SOC</title>
-  <link rel="stylesheet" href="/static/style.css?v=4" />
+  <link rel="stylesheet" href="/static/style.css?v=8" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 </head>
 <body>
-  <div class="scanline" aria-hidden="true"></div>
-
   <header class="topbar">
     <div class="brand">
-      <div class="shield" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+      <span class="shield" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M12 2.5 4.5 5.5v6c0 4.6 3.1 8.6 7.5 10 4.4-1.4 7.5-5.4 7.5-10v-6L12 2.5Z" />
           <path d="m8.7 12 2.2 2.2 4.4-4.6" />
         </svg>
-      </div>
-      <div>
-        <h1>META<span>-</span>GUARDIAN</h1>
-        <p class="tagline">Autonomous cyber-physical containment &amp; self-healing SOC</p>
-      </div>
+      </span>
+      <span class="brand-text">
+        <span class="brand-name">META-GUARDIAN</span>
+        <span class="brand-sub">Cyber-physical SOC</span>
+      </span>
     </div>
 
-    <div class="badges">
-      <span class="badge" id="modeBadge" data-kind="mode">mode: —</span>
-      <span class="badge" id="modelOoda">glimmer</span>
-      <span class="badge" id="modelSam">sam-3.1</span>
-      <span class="badge" id="modelSpark">spark-1.3</span>
-      <span class="badge" id="modelOpen">spark-open</span>
-      <span class="badge conn" id="connBadge" data-state="off">● offline</span>
-      <button class="badge badge-btn" id="archBtn" type="button" title="Show the detection and containment flow">
-        ⌘ architecture
+    <div class="topbar-right">
+      <span class="conn" id="connBadge" data-state="off">● offline</span>
+      <span class="mode-badge" id="modeBadge" data-kind="mode">mode: —</span>
+      <div class="popover-wrap">
+        <button class="tb-link" id="systemBtn" type="button" aria-haspopup="true" aria-expanded="false">
+          System
+        </button>
+        <div class="popover" id="systemPopover" hidden>
+          <p class="popover-title">Model tiers</p>
+          <div class="popover-rows">
+            <div class="popover-row"><span>Decision</span><span class="chip" id="modelOoda">glimmer</span></div>
+            <div class="popover-row"><span>Segmentation</span><span class="chip" id="modelSam">sam-3.1</span></div>
+            <div class="popover-row"><span>Forensics</span><span class="chip" id="modelSpark">spark</span></div>
+            <div class="popover-row"><span>Open weights</span><span class="chip" id="modelOpen">spark-open</span></div>
+          </div>
+        </div>
+      </div>
+      <button class="tb-link" id="archBtn" type="button" title="Show the detection and containment flow">
+        Architecture
       </button>
     </div>
   </header>
 
   <div class="token-bar" id="tokenBar" hidden>
-    <span class="tb-label">cockpit token required</span>
+    <span class="tb-label">Cockpit token required</span>
     <input id="tokenInput" type="password" placeholder="MG_COCKPIT_TOKEN"
            autocomplete="off" spellcheck="false" aria-label="Cockpit token" />
-    <button class="btn" id="tokenApply" type="button">authenticate</button>
+    <button class="btn btn-primary" id="tokenApply" type="button">Authenticate</button>
     <span class="tb-hint">or open this page with <code>?token=…</code> once</span>
   </div>
 
-  <section class="stats" aria-label="Live counters">
-    <div class="stat"><span class="k">events</span><strong id="statEvents">0</strong></div>
-    <div class="stat"><span class="k">incidents</span><strong id="statIncidents">0</strong></div>
-    <div class="stat"><span class="k">contained</span><strong id="statContained">0</strong></div>
-    <div class="stat"><span class="k">pending approval</span><strong id="statPending">0</strong></div>
-    <div class="stat wide"><span class="k">uptime</span><strong id="statUptime">00:00:00</strong></div>
+  <section class="kpis" aria-label="Live counters">
+    <div class="kpi">
+      <span class="kpi-k">Incidents</span>
+      <strong class="kpi-v" id="statIncidents">0</strong>
+    </div>
+    <div class="kpi">
+      <span class="kpi-k">Contained</span>
+      <strong class="kpi-v tone-success" id="statContained">0</strong>
+    </div>
+    <div class="kpi">
+      <span class="kpi-k">Pending approval</span>
+      <strong class="kpi-v tone-warning" id="statPending">0</strong>
+    </div>
+    <div class="kpi kpi-wide">
+      <span class="kpi-k">Mean time to contain</span>
+      <strong class="kpi-v" id="mttrValue">?</strong>
+      <span class="kpi-sub" id="mttrSub">no incidents yet</span>
+    </div>
+    <button class="more-toggle" id="moreMetricsBtn" type="button" aria-expanded="false" aria-controls="moreMetrics">
+      More metrics
+    </button>
   </section>
 
-  <section class="metrics" aria-label="Live measured metrics">
+  <section class="more-metrics" id="moreMetrics" hidden aria-label="Additional measured metrics">
     <div class="metric">
-      <span class="m-k">MTTD <em>edge detect</em></span>
+      <span class="m-k">Mean time to detect</span>
       <strong id="mttdValue">?</strong>
       <span class="m-sub" id="mttdSub">no incidents yet</span>
     </div>
     <div class="metric">
-      <span class="m-k">MTTR <em>containment</em></span>
-      <strong id="mttrValue">?</strong>
-      <span class="m-sub" id="mttrSub">no incidents yet</span>
-    </div>
-    <div class="metric">
-      <span class="m-k">Self-heal <em>patch + verify</em></span>
+      <span class="m-k">Self-heal</span>
       <strong id="patchValue">?</strong>
       <span class="m-sub" id="patchSub">no patch yet</span>
     </div>
-    <div class="metric metric-context" id="contextMetric" title="See docs/FULL_ARCHIVE_RUN.md">
-      <span class="m-k">1M context <em>validated run</em></span>
+    <div class="metric" id="contextMetric" title="See docs/FULL_ARCHIVE_RUN.md">
+      <span class="m-k">1M context</span>
       <strong id="contextValue">?</strong>
       <span class="m-sub" id="contextSub" title="docs/FULL_ARCHIVE_RUN.md">hover for the full-archive proof</span>
+    </div>
+    <div class="metric">
+      <span class="m-k">Uptime</span>
+      <strong id="statUptime">00:00:00</strong>
+      <span class="m-sub">since this page loaded</span>
+    </div>
+    <div class="metric">
+      <span class="m-k">Events</span>
+      <strong id="statEvents">0</strong>
+      <span class="m-sub">captured this session</span>
     </div>
     <div class="metric metric-chart">
       <span class="m-k">Traffic — last 5 min <em>events vs blocked</em></span>
@@ -81,18 +109,19 @@
   </section>
 
   <main class="grid">
-    <!-- LEFT COLUMN ------------------------------------------------------ -->
     <section class="col col-left">
       <article class="panel">
         <header class="panel-head">
-          <h2>Scenario injector</h2>
-          <span class="hint">demo injector — synthetic events, real containment</span>
+          <h2>Scenarios</h2>
+          <span class="hint">synthetic events, real containment</span>
         </header>
         <div class="scenario-list" id="scenarioList"></div>
         <div class="live-attack">
+          <p class="section-label">Live test</p>
           <button class="btn-attack" id="attackBtn" type="button">
             <span class="dot" aria-hidden="true"></span>
-            FIRE LIVE ATTACK <em>real HTTP → :8001</em>
+            FIRE LIVE ATTACK
+            <em>real HTTP → :8001</em>
           </button>
           <p class="attack-result" id="attackResult">
             Sends a genuine exfiltration request. No probe header: the detection chain must see it.
@@ -106,55 +135,59 @@
           <span class="pill" id="gatewayPill">unknown</span>
         </header>
         <div class="gateway" id="gatewayBody">
-          <p class="muted">reading /internal/state…</p>
+          <p class="muted">Reading /internal/state…</p>
         </div>
       </article>
     </section>
 
-    <!-- CENTER COLUMN ---------------------------------------------------- -->
     <section class="col col-center">
-      <article class="panel evidence">
-        <header class="panel-head">
-          <h2>Vision evidence — SAM 3.1</h2>
-          <span class="pill" id="visionPill">idle</span>
+      <article class="panel hero">
+        <header class="hero-head">
+          <div class="hero-id">
+            <p class="eyebrow" id="heroEyebrow">Selected incident</p>
+            <h2 class="hero-title" id="heroTitle">No incident selected</h2>
+          </div>
+          <div class="hero-badges">
+            <span class="status-tag" id="heroStatus">—</span>
+            <span class="pill" id="heroConf">conf —</span>
+            <span class="hint" id="heroTime">—</span>
+          </div>
         </header>
-        <div class="evidence-grid">
-          <figure>
-            <img id="frameImg" alt="Incident camera frame" hidden />
-            <div class="placeholder" id="framePlaceholder">no frame yet</div>
-            <figcaption>camera frame · one per event</figcaption>
-          </figure>
-          <figure>
-            <img id="maskImg" alt="SAM segmentation mask" hidden />
-            <div class="placeholder" id="maskPlaceholder">no mask yet</div>
-            <figcaption>pixel mask · bbox prompt</figcaption>
-          </figure>
-        </div>
-        <p class="vision-note" id="visionNote">Trigger a scenario to capture physical evidence.</p>
+
+        <section class="evidence-block">
+          <header class="block-head">
+            <h3>Physical evidence</h3>
+            <span class="pill" id="visionPill">idle</span>
+          </header>
+          <div class="evidence-grid">
+            <figure>
+              <img id="frameImg" alt="Incident camera frame" hidden />
+              <div class="placeholder" id="framePlaceholder">No frame captured for this incident</div>
+              <figcaption>Camera frame</figcaption>
+            </figure>
+            <figure>
+              <img id="maskImg" alt="Segmentation mask" hidden />
+              <div class="placeholder" id="maskPlaceholder">No mask captured for this incident</div>
+              <figcaption>Segmentation mask</figcaption>
+            </figure>
+          </div>
+          <p class="vision-note" id="visionNote">Trigger a scenario to capture physical evidence.</p>
+        </section>
       </article>
 
-      <article class="panel">
+      <article class="panel timeline-panel">
         <header class="panel-head">
-          <h2>OODA timeline</h2>
+          <h2>Response timeline</h2>
           <span class="hint" id="timelineIncident">no incident</span>
         </header>
         <ol class="timeline" id="timeline">
           <li class="empty">Observe → Orient → Decide → Act</li>
         </ol>
       </article>
-
-      <article class="panel logs">
-        <header class="panel-head">
-          <h2>Live event stream</h2>
-          <span class="hint">WebSocket /ws</span>
-        </header>
-        <ul class="log-feed" id="logFeed"></ul>
-      </article>
     </section>
 
-    <!-- RIGHT COLUMN ----------------------------------------------------- -->
     <section class="col col-right">
-      <article class="panel">
+      <article class="panel incidents-panel">
         <header class="panel-head">
           <h2>Incidents</h2>
           <span class="hint" id="incidentCount">0</span>
@@ -166,12 +199,19 @@
     </section>
   </main>
 
+  <details class="drawer">
+    <summary>
+      <span class="drawer-title">Live event stream</span>
+      <span class="hint">WebSocket /ws</span>
+    </summary>
+    <ul class="log-feed" id="logFeed"></ul>
+  </details>
+
   <footer class="foot">
     <span>Meta-Guardian · Meta Global AI Developer Hackathon 2026</span>
     <span>edge frame-diff + SAM 3.1 · MCP quarantine · deterministic policy gate</span>
   </footer>
 
-  <script src="/static/app.js?v=4"></script>
   <div class="alert-banner" id="alertBanner" role="status" aria-live="polite" hidden>
     <span class="ab-dot" aria-hidden="true"></span>
     <span class="ab-text" id="alertBannerText"></span>
@@ -269,5 +309,7 @@
       </footer>
     </div>
   </div>
+
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

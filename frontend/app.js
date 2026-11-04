@@ -8,6 +8,7 @@
     snapshot: null,
     incidents: [],
     latest: null,
+    pinnedId: null,
     events: [],
     gateway: null,
     metrics: null,
@@ -195,17 +196,51 @@
     const archClose = $("archClose");
     const backdrop = $("archBackdrop");
     const bannerClose = $("alertBannerClose");
+    const systemButton = $("systemBtn");
+    const systemPopover = $("systemPopover");
+    const moreButton = $("moreMetricsBtn");
+    const moreMetrics = $("moreMetrics");
 
     if (archButton) archButton.addEventListener("click", openArch);
     if (archClose) archClose.addEventListener("click", closeArch);
     if (backdrop) backdrop.addEventListener("click", closeArch);
     if (bannerClose) bannerClose.addEventListener("click", hideBanner);
 
+    const closeSystem = () => {
+      if (!systemPopover || systemPopover.hidden) return;
+      systemPopover.hidden = true;
+      if (systemButton) systemButton.setAttribute("aria-expanded", "false");
+    };
+
+    if (systemButton && systemPopover) {
+      systemButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const open = systemPopover.hidden;
+        systemPopover.hidden = !open;
+        systemButton.setAttribute("aria-expanded", String(open));
+      });
+      document.addEventListener("click", (event) => {
+        if (!systemPopover.hidden && !systemPopover.contains(event.target)) closeSystem();
+      });
+    }
+
+    if (moreButton && moreMetrics) {
+      moreButton.addEventListener("click", () => {
+        const open = moreMetrics.hidden;
+        moreMetrics.hidden = !open;
+        moreButton.setAttribute("aria-expanded", String(open));
+      });
+    }
+
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
       const modal = $("archModal");
       if (modal && !modal.hidden) {
         closeArch();
+        return;
+      }
+      if (systemPopover && !systemPopover.hidden) {
+        closeSystem();
         return;
       }
       hideBanner();
@@ -292,13 +327,14 @@
       button.className = "scenario";
       button.type = "button";
       button.dataset.scenario = item.id;
+      button.title = item.detail || item.title;
       button.innerHTML = `
         <span class="tag">${esc(item.id)}</span>
         <span>
           <span class="s-title">${esc(item.title)}</span>
           <span class="s-detail">${esc(item.detail)}</span>
         </span>
-        <span class="s-play">RUN ▸</span>`;
+        <span class="s-play">Run</span>`;
       button.addEventListener("click", () => runScenario(item.id));
       host.appendChild(button);
     });
@@ -362,9 +398,9 @@
           {
             label: "events",
             data: [],
-            borderColor: "#39e1ff",
-            backgroundColor: "rgba(57,225,255,0.10)",
-            borderWidth: 1.6,
+            borderColor: "#4c8df6",
+            backgroundColor: "rgba(76,141,246,0.10)",
+            borderWidth: 1.4,
             pointRadius: 0,
             tension: 0.35,
             fill: true,
@@ -372,9 +408,9 @@
           {
             label: "blocked",
             data: [],
-            borderColor: "#ff5470",
-            backgroundColor: "rgba(255,84,112,0.08)",
-            borderWidth: 1.6,
+            borderColor: "#e5534b",
+            backgroundColor: "rgba(229,83,75,0.08)",
+            borderWidth: 1.4,
             pointRadius: 0,
             tension: 0.35,
             fill: true,
@@ -395,16 +431,16 @@
               boxWidth: 8,
               boxHeight: 8,
               usePointStyle: true,
-              color: "#7f91ab",
-              font: { family: "JetBrains Mono, monospace", size: 9 },
+              color: "#9aa4b2",
+              font: { family: "Segoe UI, system-ui, sans-serif", size: 9 },
             },
           },
           tooltip: {
-            backgroundColor: "rgba(10,16,27,0.95)",
-            borderColor: "rgba(86,130,190,0.35)",
+            backgroundColor: "rgba(22,26,32,0.98)",
+            borderColor: "#333a45",
             borderWidth: 1,
-            titleFont: { family: "JetBrains Mono, monospace", size: 10 },
-            bodyFont: { family: "JetBrains Mono, monospace", size: 10 },
+            titleFont: { family: "Cascadia Code, Consolas, monospace", size: 10 },
+            bodyFont: { family: "Cascadia Code, Consolas, monospace", size: 10 },
           },
         },
         scales: {
@@ -413,11 +449,11 @@
             beginAtZero: true,
             ticks: {
               precision: 0,
-              color: "#5d6f88",
-              font: { family: "JetBrains Mono, monospace", size: 8 },
+              color: "#6b7686",
+              font: { family: "Cascadia Code, Consolas, monospace", size: 8 },
               maxTicksLimit: 3,
             },
-            grid: { color: "rgba(86,130,190,0.10)" },
+            grid: { color: "rgba(51,58,69,0.35)" },
             border: { display: false },
           },
         },
@@ -524,69 +560,79 @@
       const policy = incident.policy || {};
       const sev = (decision.severity || "info").toLowerCase();
       const pending = (policy.pending_actions || []).length;
+      const selected = state.latest && state.latest.id === incident.id;
 
       const card = document.createElement("article");
-      card.className = "incident";
+      card.className = `incident${selected ? " is-selected" : ""}`;
       card.dataset.sev = sev;
+      card.dataset.id = incident.id;
+      card.tabIndex = 0;
+      card.setAttribute("role", "button");
+      card.setAttribute("aria-label", `Inspect incident ${incident.id.slice(-6)}`);
       card.innerHTML = `
         <div class="i-head">
-          <span class="i-title">Scenario ${esc(incident.scenario || "?")} · ${esc(incident.id.slice(-6))}</span>
+          <span class="sev-dot sev-${esc(sev)}" aria-hidden="true"></span>
+          <div style="min-width:0">
+            <span class="i-title">${esc(classificationLabel(decision.classification))}</span>
+            <span class="i-sub">${esc(incident.id.slice(-6))} · ${esc(ago(incident.created_at))} · conf ${(decision.confidence ?? 0).toFixed(2)}</span>
+          </div>
           <span class="status-tag ${esc(incident.status)}">${esc(statusLabel(incident.status))}</span>
         </div>
         <div class="i-meta">
           <span class="pill ${classificationTone(decision.classification)}">${esc(decision.classification || "—")}</span>
-          <span class="pill">conf ${(decision.confidence ?? 0).toFixed(2)}</span>
           <span class="pill ${policy.mode === "approval" ? "warn" : policy.mode === "monitor" ? "" : "ok"}">${esc(policy.mode || "—")}</span>
           <span class="pill">${(incident.action_results || []).length} action(s)</span>
           ${policy.session && policy.session.origin_ip ? `<span class="pill warn">origin ${esc(policy.session.origin_ip)}</span>` : ""}
           ${incident.vision && incident.vision.tampered ? '<span class="pill warn">CAMERA TAMPERED</span>' : ""}
           ${decision.model === "fallback" ? '<span class="pill warn" title="The model was unavailable: this verdict came from the deterministic fallback.">DEGRADED · fallback</span>' : ""}
-          ${(incident.attack_techniques || []).map((t) => `<span class="pill" title="${esc(t.name || "")}">${esc(t.id || "")}</span>`).join("")}
+          ${(incident.attack_techniques || []).map((t) => `<span class="chip" title="${esc(t.name || "")}">${esc(t.id || "")}</span>`).join("")}
           ${incident.forensics ? `<span class="pill ${incident.forensics.citations_verified ? "ok" : "warn"}">forensics ${incident.forensics.citations_verified ? "verified" : "unverified"}</span>` : ""}
           ${incident.patch ? `<span class="pill ${incident.patch.verified ? "ok" : "bad"}">patch ${incident.patch.verified ? "200 → 403" : "failed"}</span>` : ""}
         </div>
-        <p class="muted">${esc((decision.reasoning || "").slice(0, 190))}</p>
-        <div class="i-actions"></div>`;
+        <p class="i-reason">${esc((decision.reasoning || "").slice(0, 160))}</p>
+        <div class="i-actions${pending > 0 ? " has-pending" : ""}"></div>`;
 
       const actions = card.querySelector(".i-actions");
+      actions.addEventListener("click", (event) => event.stopPropagation());
+
       if (pending > 0) {
         const approve = document.createElement("button");
-        approve.className = "btn";
-        approve.textContent = `APPROVE ${pending}`;
+        approve.className = "btn btn-primary";
+        approve.textContent = `Approve ${pending}`;
         approve.addEventListener("click", () => approveIncident(incident.id, approve));
         actions.appendChild(approve);
       }
       const inspect = document.createElement("button");
       inspect.className = "btn";
-      inspect.textContent = "INSPECT";
+      inspect.textContent = "Inspect";
       inspect.addEventListener("click", () => loadIncident(incident.id));
       actions.appendChild(inspect);
 
       if (pending > 0) {
         const reject = document.createElement("button");
         reject.className = "btn danger";
-        reject.textContent = "REJECT";
+        reject.textContent = "Reject";
         reject.addEventListener("click", () => rejectIncident(incident.id, reject));
         actions.appendChild(reject);
       }
 
       const caseFile = document.createElement("button");
       caseFile.className = "btn";
-      caseFile.textContent = "CASE FILE";
+      caseFile.textContent = "Case file";
       caseFile.title = "Download the SOC case file as Markdown";
       caseFile.addEventListener("click", () => downloadCaseFile(incident.id, caseFile));
       actions.appendChild(caseFile);
 
       const analyze = document.createElement("button");
       analyze.className = "btn";
-      analyze.textContent = incident.forensics ? "RE-ANALYZE" : "ANALYZE";
+      analyze.textContent = incident.forensics ? "Re-analyze" : "Analyze";
       analyze.addEventListener("click", () => runForensics(incident.id, analyze));
       actions.appendChild(analyze);
 
       if (incident.forensics) {
         const patch = document.createElement("button");
         patch.className = "btn";
-        patch.textContent = incident.patch ? "RE-PATCH" : "PATCH";
+        patch.textContent = incident.patch ? "Re-patch" : "Patch";
         patch.addEventListener("click", () => runPatch(incident.id, patch));
         actions.appendChild(patch);
       }
@@ -594,16 +640,64 @@
       if (incident.status === "open") {
         const dismiss = document.createElement("button");
         dismiss.className = "btn danger";
-        dismiss.textContent = "DISMISS";
+        dismiss.textContent = "Dismiss";
         dismiss.addEventListener("click", () => dismissIncident(incident.id, dismiss));
         actions.appendChild(dismiss);
       }
+
+      card.addEventListener("click", () => loadIncident(incident.id));
+      card.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          loadIncident(incident.id);
+        }
+      });
 
       host.appendChild(card);
     });
   }
 
+  function classificationLabel(classification) {
+    return {
+      THREAT_CRITICAL: "Critical threat",
+      CREDENTIAL_MISUSE: "Credential misuse",
+      GHOST_ATTACK: "Ghost attack",
+      BENIGN_AUTHORIZED: "Authorized activity",
+    }[classification] || classification || "Unclassified incident";
+  }
+
+  function renderHero(incident) {
+    const title = $("heroTitle");
+    const eyebrow = $("heroEyebrow");
+    const status = $("heroStatus");
+    const conf = $("heroConf");
+    const time = $("heroTime");
+    if (!title) return;
+
+    if (!incident) {
+      eyebrow.textContent = "Selected incident";
+      title.textContent = "No incident selected";
+      status.className = "status-tag";
+      status.textContent = "—";
+      conf.className = "pill";
+      conf.textContent = "conf —";
+      time.textContent = "—";
+      return;
+    }
+
+    const decision = incident.decision || {};
+    eyebrow.textContent = `Incident ${String(incident.id || "").slice(-8)}`;
+    title.textContent = classificationLabel(decision.classification);
+    status.className = `status-tag ${incident.status || ""}`;
+    status.textContent = statusLabel(incident.status);
+    conf.className = "pill";
+    conf.textContent = `conf ${(decision.confidence ?? 0).toFixed(2)}`;
+    time.textContent = ago(incident.created_at);
+  }
+
   function renderEvidence(incident) {
+    renderHero(incident);
+
     const frame = $("frameImg");
     const framePlaceholder = $("framePlaceholder");
     const mask = $("maskImg");
@@ -736,12 +830,28 @@
       meta: `<span class="status-tag ${esc(incident.status)}">${esc(statusLabel(incident.status))}</span>`,
     });
 
-    host.innerHTML = steps.map((step) => `
-      <li class="${step.kind === "act" ? "act" : step.kind === "gate" ? "gate" : ""}">
+    host.innerHTML = steps.map((step) => {
+      const cls = step.kind === "act" ? "act" : step.kind === "gate" ? "gate" : step.kind;
+      const meta = step.meta || "";
+      return `
+      <li class="${cls}">
         <div class="t-head"><span>${step.head}</span></div>
         <div class="t-body">${step.body}</div>
-        <div class="t-meta">${step.meta || ""}</div>
-      </li>`).join("");
+        ${meta ? `<div class="t-detail"><div class="t-meta">${meta}</div></div>
+        <button class="t-toggle" type="button" aria-expanded="false">Show details</button>` : ""}
+      </li>`;
+    }).join("");
+
+    host.querySelectorAll(".t-toggle").forEach((button) => {
+      button.addEventListener("click", () => {
+        const item = button.closest("li");
+        if (!item) return;
+        item.classList.toggle("is-open");
+        const open = item.classList.contains("is-open");
+        button.setAttribute("aria-expanded", String(open));
+        button.textContent = open ? "Hide details" : "Show details";
+      });
+    });
   }
 
   function renderAll() {
@@ -791,8 +901,10 @@
   async function loadIncident(id) {
     const incident = await api(`/api/incidents/${encodeURIComponent(id)}`);
     state.latest = incident;
+    state.pinnedId = incident.id;
     renderTimeline(incident);
     renderEvidence(incident);
+    renderIncidents();
   }
 
   /* ----------------------------------------------------------------- actions */
@@ -861,6 +973,7 @@
         body: JSON.stringify({ scenario: id }),
       });
       state.latest = incident;
+      state.pinnedId = incident.id;
       await Promise.all([loadEvents(), loadIncidents(), loadSnapshot(), loadGateway()]);
       renderTimeline(incident);
       renderEvidence(incident);
@@ -892,11 +1005,13 @@
   function downloadCaseFile(id, button) {
     button.disabled = true;
     const anchor = document.createElement("a");
-    anchor.href = `/api/incidents/${encodeURIComponent(id)}/casefile?format=markdown`;
+    const auth = state.token ? `&token=${encodeURIComponent(state.token)}` : "";
+    anchor.href = `/api/incidents/${encodeURIComponent(id)}/casefile?format=markdown${auth}`;
     anchor.download = `meta-guardian-casefile-${id}.md`;
     document.body.appendChild(anchor);
     anchor.click();
-    anchor.remove();
+    // Removing the anchor in the same tick can cancel the download.
+    setTimeout(() => anchor.remove(), 1000);
     pushLocalEvent("info", `case file downloaded for ${id}`);
     button.disabled = false;
   }
@@ -1011,10 +1126,18 @@
         renderEvents();
         loadSnapshot().catch(() => {});
       } else if (payload.type === "incident") {
-        state.latest = payload.incident;
-        renderTimeline(payload.incident);
-        renderEvidence(payload.incident);
-        bannerForIncident(payload.incident);
+        const incoming = payload.incident;
+        // Keep the hero pinned to what the operator selected. Background
+        // watcher incidents must not steal the view mid-demo; they still
+        // land in the list and the alert banner.
+        const keepFocus = state.pinnedId && state.latest
+          && state.latest.id !== incoming.id;
+        if (!keepFocus) {
+          state.latest = incoming;
+          renderTimeline(incoming);
+          renderEvidence(incoming);
+        }
+        bannerForIncident(incoming);
         loadIncidents().catch(() => {});
         loadMetrics().catch(() => {});
       } else if (payload.type === "attack") {
@@ -1122,6 +1245,7 @@
       const latest = state.incidents[0];
       if (latest) {
         state.latest = latest;
+        state.pinnedId = latest.id;
         renderTimeline(latest);
         renderEvidence(latest);
       } else {
