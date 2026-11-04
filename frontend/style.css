@@ -367,6 +367,10 @@ button { font-family: inherit; }
   min-height: 0;
 }
 
+.col-left .panel {
+  flex: 0 0 auto;
+}
+
 .panel-head {
   flex: 0 0 auto;
   display: flex;
