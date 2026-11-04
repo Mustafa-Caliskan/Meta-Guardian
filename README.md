@@ -53,7 +53,7 @@ Every claim below is reproducible from this repository, with the command next to
 - **Versus a credible legacy engine**, on the same three scenarios: 50% vs 100% recall on
   attacks and 100% vs 0% false positives on the approved-maintenance case
   (`python scripts/benchmark_baseline.py --patch`).
-- **Machine-checkable**: 242 tests, and every module runs offline in `mock` mode.
+- **Machine-checkable**: 345 tests, and every module runs offline in `mock` mode.
 
 ## Architecture
 
