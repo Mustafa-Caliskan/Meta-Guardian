@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Deque
 
 import httpx
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -1160,7 +1160,10 @@ def create_app(
 
     # ------------------------------------------------------------------ auth
 
-    def require_cockpit_auth(authorization: str | None = Header(default=None)) -> str:
+    def require_cockpit_auth(
+        authorization: str | None = Header(default=None),
+        token: str | None = Query(default=None),
+    ) -> str:
         """Bearer auth for the control plane when MG_COCKPIT_TOKEN is set.
 
         Returns the operator identity to record on human decisions. With no token
@@ -1175,6 +1178,8 @@ def create_app(
         supplied = ""
         if authorization and authorization.lower().startswith("bearer "):
             supplied = authorization[7:].strip()
+        elif token:
+            supplied = token.strip()
 
         if not supplied or not hmac.compare_digest(supplied, expected):
             raise HTTPException(

@@ -625,12 +625,13 @@
 
     const stamp = Date.now();
     const id = encodeURIComponent(incident.id);
-    frame.src = `/api/incidents/${id}/frame?t=${stamp}`;
+    const tokenParam = state.token ? `&token=${encodeURIComponent(state.token)}` : "";
+    frame.src = `/api/incidents/${id}/frame?t=${stamp}${tokenParam}`;
     frame.hidden = false;
     framePlaceholder.hidden = true;
     frame.onerror = () => { frame.hidden = true; framePlaceholder.hidden = false; framePlaceholder.textContent = "frame unavailable"; };
 
-    mask.src = `/api/incidents/${id}/mask?t=${stamp}`;
+    mask.src = `/api/incidents/${id}/mask?t=${stamp}${tokenParam}`;
     mask.hidden = false;
     maskPlaceholder.hidden = true;
     mask.onerror = () => { mask.hidden = true; maskPlaceholder.hidden = false; maskPlaceholder.textContent = "mask unavailable"; };
