@@ -120,6 +120,7 @@ class Settings:
     correlation_window_seconds: float = 30.0
     correlation_cooldown_seconds: float = 10.0
     operator_motion_threshold: float = 0.004
+    operator_max_motion_ratio: float = 0.45
     segmentation_async: bool = True
     baseline_frame: str = ""
     persist_incidents: bool = True
@@ -252,6 +253,7 @@ def get_settings() -> Settings:
         correlation_window_seconds=_env_float("CORRELATION_WINDOW_SECONDS", 30.0),
         correlation_cooldown_seconds=_env_float("CORRELATION_COOLDOWN_SECONDS", 10.0),
         operator_motion_threshold=_env_float("OPERATOR_MOTION_THRESHOLD", 0.004),
+        operator_max_motion_ratio=_env_float("OPERATOR_MAX_MOTION_RATIO", 0.45),
         segmentation_async=_env("SEGMENTATION_ASYNC", "1") not in ("0", "false", "False"),
         baseline_frame=_env("BASELINE_FRAME", ""),
         persist_incidents=_env("PERSIST_INCIDENTS", "1") not in ("0", "false", "False"),

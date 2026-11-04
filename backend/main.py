@@ -158,6 +158,7 @@ class AppState:
         self.presence = PresenceDetector(
             baseline_path=self.settings.baseline_frame_path,
             motion_threshold=self.settings.operator_motion_threshold,
+            max_motion_ratio=self.settings.operator_max_motion_ratio,
         )
         self._tasks: list[asyncio.Task] = []
         self._pipeline_tasks: set[asyncio.Task] = set()
